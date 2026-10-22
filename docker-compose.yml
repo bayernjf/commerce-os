@@ -1,0 +1,47 @@
+# Production-shaped local deployment. The container binds only to the loopback
+# interface; a reverse proxy on the host (Caddy for automatic TLS, or nginx +
+# certbot) terminates the domain/TLS and forwards to 127.0.0.1:8787.
+#
+# Secrets and the real environment are provided via an untracked `.env` file
+# (see .env.example). Never commit `.env`.
+services:
+  commerce-os:
+    build:
+      context: .
+      additional_contexts:
+        # Base image resolved from the local image store (no registry auth).
+        base: docker-image://node:22-slim
+        # Cross-repo typed decision client (file: dependency in package.json).
+        zeusclient: ../zeus/packages/zeus-client
+    image: commerce-os:latest
+    env_file: .env
+    environment:
+      COMMERCE_DB_DRIVER: sqlite
+      COMMERCE_SQLITE_PATH: /data/commerce-os.db
+      COMMERCE_HOST: 0.0.0.0
+      COMMERCE_PORT: "8787"
+    volumes:
+      - commerce-data:/data
+    ports:
+      # Loopback only; the reverse proxy exposes 80/443 publicly.
+      - "127.0.0.1:8787:8787"
+    restart: unless-stopped
+    healthcheck:
+      # Liveness for the container runtime; readiness is /readyz.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  commerce-data:
