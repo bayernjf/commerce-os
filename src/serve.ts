@@ -8,9 +8,25 @@ import { migrateUp } from './storage/migrate.js';
 import { ZeusDecisionClient } from './decision/zeus-decision-client.js';
 import { LoomContentClient } from './content/loom-content-client.js';
 import type { ContentClient } from './content/types.js';
+import { createAlertReporter } from './observability/alerts.js';
+import { logger } from './observability/logger.js';
 
 async function main(): Promise<void> {
+  const reporter = createAlertReporter();
+
+  // Any fatal error that escapes the HTTP layer is alerted and exits non-zero
+  // so the container restart policy (or orchestrator) takes over.
+  process.on('unhandledRejection', (reason) => {
+    reporter.report('process_fatal', 'critical', `unhandled rejection: ${String(reason)}`);
+    process.exit(1);
+  });
+  process.on('uncaughtException', (err) => {
+    reporter.report('process_fatal', 'critical', `uncaught exception: ${err.message}`);
+    process.exit(1);
+  });
+
   const driverKind = process.env.COMMERCE_DB_DRIVER ?? 'sqlite';
+  let dataDir: string | undefined;
   const driver =
     driverKind === 'postgres'
       ? await PostgresDriver.connect(
@@ -20,12 +36,15 @@ async function main(): Promise<void> {
         )
       : (() => {
           const path = process.env.COMMERCE_SQLITE_PATH ?? './data/commerce-os.db';
-          if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+          if (path !== ':memory:') {
+            dataDir = dirname(path);
+            mkdirSync(dataDir, { recursive: true });
+          }
           return new SqliteDriver(path);
         })();
 
   const applied = await migrateUp(driver);
-  if (applied.length > 0) console.log(`migrations applied: ${applied.join(', ')}`);
+  if (applied.length > 0) logger.info('migrations applied', { migrations: applied });
 
   const decisions = new ZeusDecisionClient({
     baseUrl: process.env.ZEUS_BASE_URL ?? 'http://127.0.0.1:8080',
@@ -45,18 +64,37 @@ async function main(): Promise<void> {
   const app = createApp({
     ...(process.env.COMMERCE_API_TOKEN ? { token: process.env.COMMERCE_API_TOKEN } : {}),
     services,
+    reporter,
+    ...(dataDir ? { dataDir } : {}),
   });
   const port = Number(process.env.COMMERCE_PORT ?? 8787);
   const host = process.env.COMMERCE_HOST ?? '127.0.0.1';
 
   // node:http via @hono/node-server (Node runtime).
   const { serve } = await import('@hono/node-server');
-  serve({ fetch: app.fetch, port, hostname: host }, (info) => {
-    console.log(`commerce-os listening on http://${host}:${info.port} (driver=${driver.dialect})`);
+  const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
+    logger.info('commerce-os listening', { host, port: info.port, driver: driver.dialect });
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info('shutting down', { signal });
+    server.close(() => {
+      driver
+        .close()
+        .then(() => process.exit(0))
+        .catch(() => process.exit(1));
+    });
+    // Safety net if open connections keep the server from closing.
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch((err) => {
-  console.error('startup failed:', err);
+  logger.error('startup failed', { error: (err as Error).message });
   process.exit(1);
 });
