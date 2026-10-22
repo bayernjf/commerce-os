@@ -1,0 +1,34 @@
+{
+  "name": "commerce-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-operated commerce minimal loop: products / orders / channel adapters / aftersales; decisions are delegated to zeus via zeus-client (Tier0 M3).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node --experimental-sqlite dist/serve.js",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "migrate:up": "node --experimental-sqlite scripts/migrate.mjs up",
+    "migrate:status": "node --experimental-sqlite scripts/migrate.mjs status",
+    "migrate:pg:up": "node scripts/migrate.mjs up --driver postgres",
+    "migrate:pg:status": "node scripts/migrate.mjs status --driver postgres",
+    "check:migrations": "bash scripts/check-migrations.sh"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "hono": "^4.13.13",
+    "zeus-client": "file:../zeus/packages/zeus-client"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "eslint": "^9.0.0",
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^2.1.0"
+  }
+}
