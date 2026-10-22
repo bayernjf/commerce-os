@@ -21,13 +21,24 @@ describe('HTTP API v1 smoke', () => {
     expect(body.db).toBe('sqlite');
   });
 
-  it('unregistered channel fails closed with 422', async () => {
+  it('import from a missing channel account returns 404', async () => {
     const res = await app.request('/api/v1/orders/import', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ channelAccountId: 'acc_missing' }),
     });
     expect(res.status).toBe(404);
+  });
+
+  it('live channel account without credentialRef fails closed with 422', async () => {
+    const res = await app.request('/api/v1/channel-accounts', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ channel: 'douyin', displayName: 'live shop' }),
+    });
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe('CREDENTIAL_MISSING');
   });
 
   it('full loop over HTTP: account → product → listing 423 → approve → import → refund → approve', async () => {
