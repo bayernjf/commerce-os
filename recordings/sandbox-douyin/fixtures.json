@@ -1,0 +1,40 @@
+{
+  "channel": "sandbox-douyin",
+  "recordedAt": "2026-10-22T00:00:00.000Z",
+  "note": "Recorded fixtures for the offline sandbox channel (job-agent recording pattern). No real credentials, no network. These are deterministic canned responses, not live platform data.",
+  "upsertProduct": {
+    "externalProductId": "dy-sandbox-prd-1001",
+    "externalSkuIdPrefix": "dy-sandbox-sku"
+  },
+  "orders": [
+    {
+      "externalOrderId": "DY-SB-20261022-0001",
+      "status": "paid",
+      "totalAmount": 1299.0,
+      "currency": "CNY",
+      "buyerRef": "buyer-sandbox-7",
+      "createdAt": "2026-10-22T08:30:00.000Z",
+      "lines": [
+        {
+          "externalItemId": "DY-SB-ITEM-9001",
+          "externalSkuCode": "SKU-DEMO-001",
+          "title": "演示商品 标准款（沙箱录制）",
+          "qty": 1,
+          "price": 1299.0
+        }
+      ]
+    }
+  ],
+  "inventory": [
+    { "skuCode": "SKU-DEMO-001", "qtyAvailable": 42 }
+  ],
+  "refund": {
+    "externalRefundId": "DY-SB-REFUND-5001",
+    "status": "accepted"
+  },
+  "publish": {
+    "externalContentId": "DY-SB-CONTENT-7001",
+    "status": "published",
+    "url": "https://sandbox.example/content/DY-SB-CONTENT-7001"
+  }
+}
