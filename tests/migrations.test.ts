@@ -34,7 +34,7 @@ describe('sqlite migration runner', () => {
   it('applies all migrations and is idempotent on a second run', async () => {
     const driver = new SqliteDriver(':memory:');
     const first = await migrateUp(driver);
-    expect(first).toEqual(['001_init']);
+    expect(first).toEqual(['001_init', '002_customer_service']);
     const status = await migrationStatus(driver);
     expect(status.pending).toEqual([]);
     const second = await migrateUp(driver);

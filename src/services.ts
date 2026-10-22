@@ -9,6 +9,7 @@ import { AftersaleService } from './aftersale/aftersale-service.js';
 import { FulfillmentService } from './fulfillment/fulfillment-service.js';
 import { StubContentClient } from './content/stub-content-client.js';
 import type { ContentClient } from './content/types.js';
+import { CustomerService } from './customer-service/customer-service.js';
 import { PublishingService } from './publishing/publishing-service.js';
 import type { DecisionPort } from './decision/types.js';
 
@@ -22,6 +23,7 @@ export interface CommerceServices {
   aftersales: AftersaleService;
   fulfillment: FulfillmentService;
   publishing: PublishingService;
+  customerService: CustomerService;
 }
 
 /**
@@ -43,6 +45,7 @@ export function createServices(
   const aftersales = new AftersaleService(driver, eventLog, decisions, resolvedRegistry, accounts, orders);
   const contentClient = content ?? new StubContentClient();
   const publishing = new PublishingService(eventLog, decisions, resolvedRegistry, accounts, products, contentClient);
+  const customerService = new CustomerService(driver, decisions, orders);
   return {
     driver,
     events: eventLog,
@@ -53,5 +56,6 @@ export function createServices(
     aftersales,
     fulfillment,
     publishing,
+    customerService,
   };
 }
