@@ -8,6 +8,7 @@ import { OrderService } from './order/order-service.js';
 import { AftersaleService } from './aftersale/aftersale-service.js';
 import { FulfillmentService } from './fulfillment/fulfillment-service.js';
 import { StubContentClient } from './content/stub-content-client.js';
+import type { ContentClient } from './content/types.js';
 import { PublishingService } from './publishing/publishing-service.js';
 import type { DecisionPort } from './decision/types.js';
 
@@ -27,7 +28,12 @@ export interface CommerceServices {
  * Composition root. The DecisionPort is injected: tests use a recorded
  * zeus HTTP server, production uses ZeusDecisionClient pointing at zeus.
  */
-export function createServices(driver: StorageDriver, decisions: DecisionPort, registry?: ChannelRegistry): CommerceServices {
+export function createServices(
+  driver: StorageDriver,
+  decisions: DecisionPort,
+  registry?: ChannelRegistry,
+  content?: ContentClient,
+): CommerceServices {
   const eventLog = new EventLog(driver);
   const resolvedRegistry = registry ?? createDefaultRegistry();
   const accounts = new ChannelAccountService(driver);
@@ -35,8 +41,8 @@ export function createServices(driver: StorageDriver, decisions: DecisionPort, r
   const orders = new OrderService(driver, resolvedRegistry, accounts, eventLog);
   const fulfillment = new FulfillmentService(driver, resolvedRegistry, accounts);
   const aftersales = new AftersaleService(driver, eventLog, decisions, resolvedRegistry, accounts, orders);
-  const content = new StubContentClient();
-  const publishing = new PublishingService(eventLog, decisions, resolvedRegistry, accounts, products, content);
+  const contentClient = content ?? new StubContentClient();
+  const publishing = new PublishingService(eventLog, decisions, resolvedRegistry, accounts, products, contentClient);
   return {
     driver,
     events: eventLog,

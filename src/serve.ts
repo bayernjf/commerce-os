@@ -6,6 +6,8 @@ import { SqliteDriver } from './storage/sqlite/sqlite-driver.js';
 import { PostgresDriver } from './storage/postgres/postgres-driver.js';
 import { migrateUp } from './storage/migrate.js';
 import { ZeusDecisionClient } from './decision/zeus-decision-client.js';
+import { LoomContentClient } from './content/loom-content-client.js';
+import type { ContentClient } from './content/types.js';
 
 async function main(): Promise<void> {
   const driverKind = process.env.COMMERCE_DB_DRIVER ?? 'sqlite';
@@ -29,7 +31,16 @@ async function main(): Promise<void> {
     baseUrl: process.env.ZEUS_BASE_URL ?? 'http://127.0.0.1:8080',
     token: process.env.ZEUS_INTERNAL_TOKEN ?? 'dev-local-token',
   });
-  const services = createServices(driver, decisions);
+
+  // LOOM_BASE_URL 设了才走真实内容底座；否则用离线桩（不触网）。
+  const loomBaseUrl = process.env.LOOM_BASE_URL;
+  const content: ContentClient | undefined = loomBaseUrl
+    ? new LoomContentClient({
+        baseUrl: loomBaseUrl,
+        ...(process.env.LOOM_ACTOR_ID ? { actorId: process.env.LOOM_ACTOR_ID } : {}),
+      })
+    : undefined;
+  const services = createServices(driver, decisions, undefined, content);
 
   const app = createApp({
     ...(process.env.COMMERCE_API_TOKEN ? { token: process.env.COMMERCE_API_TOKEN } : {}),

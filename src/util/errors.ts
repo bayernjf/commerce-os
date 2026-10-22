@@ -11,6 +11,7 @@ export type CommerceErrorCode =
   | 'IDEMPOTENCY_CONFLICT'
   | 'DECISION_HELD'
   | 'DECISION_UNAVAILABLE'
+  | 'CONTENT_UNAVAILABLE'
   | 'NOT_IMPLEMENTED_PLACEHOLDER'
   | 'CONFLICT';
 
@@ -43,6 +44,7 @@ export function httpStatusFor(code: CommerceErrorCode): number {
     case 'DECISION_HELD':
       return 423; // Locked: an approval is required before the action continues
     case 'DECISION_UNAVAILABLE':
+    case 'CONTENT_UNAVAILABLE':
     case 'CHANNEL_UNAVAILABLE':
       return 503;
     case 'NOT_IMPLEMENTED_PLACEHOLDER':
