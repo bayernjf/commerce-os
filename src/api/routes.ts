@@ -1,12 +1,23 @@
 import type { Hono } from 'hono';
-import { CommerceError, errorBody, httpStatusFor } from '../util/errors.js';
+import { CommerceError, errorBody, httpStatusFor, type CommerceErrorCode } from '../util/errors.js';
 import type { CommerceServices } from '../services.js';
+import type { AlertKind, AlertReporter } from '../observability/alerts.js';
+
+/** Map a retryable dependency error to its alert kind. */
+const ALERT_BY_CODE: Partial<Record<CommerceErrorCode, AlertKind>> = {
+  DECISION_UNAVAILABLE: 'decision_unavailable',
+  CONTENT_UNAVAILABLE: 'content_unavailable',
+  CHANNEL_UNAVAILABLE: 'channel_unavailable',
+};
 
 /**
  * HTTP routes v1. All business routes are under /api/v1 and require a
  * bearer token when COMMERCE_API_TOKEN is configured.
  */
-export function registerHttpRoutes(app: Hono, deps: { token?: string; services: CommerceServices }): void {
+export function registerHttpRoutes(
+  app: Hono,
+  deps: { token?: string; services: CommerceServices; reporter?: AlertReporter },
+): void {
   const { services } = deps;
 
   if (deps.token) {
@@ -21,8 +32,14 @@ export function registerHttpRoutes(app: Hono, deps: { token?: string; services: 
 
   app.onError((err, c) => {
     if (err instanceof CommerceError) {
-      return c.json({ error: errorBody(err) }, httpStatusFor(err.code) as 400 | 404 | 409 | 422 | 423 | 501 | 503);
+      const status = httpStatusFor(err.code);
+      const alertKind = ALERT_BY_CODE[err.code];
+      if (status === 503 && alertKind) {
+        deps.reporter?.report(alertKind, 'warning', err.message, { code: err.code });
+      }
+      return c.json({ error: errorBody(err) }, status as 400 | 404 | 409 | 422 | 423 | 501 | 503);
     }
+    deps.reporter?.report('process_fatal', 'critical', `unhandled error: ${(err as Error).message}`);
     return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message, retryable: false } }, 500);
   });
 
