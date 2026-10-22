@@ -10,6 +10,7 @@ import { FulfillmentService } from './fulfillment/fulfillment-service.js';
 import { StubContentClient } from './content/stub-content-client.js';
 import type { ContentClient } from './content/types.js';
 import { CustomerService } from './customer-service/customer-service.js';
+import { DashboardService } from './dashboard/dashboard-service.js';
 import { PublishingService } from './publishing/publishing-service.js';
 import type { DecisionPort } from './decision/types.js';
 
@@ -24,6 +25,7 @@ export interface CommerceServices {
   fulfillment: FulfillmentService;
   publishing: PublishingService;
   customerService: CustomerService;
+  dashboard: DashboardService;
 }
 
 /**
@@ -46,6 +48,7 @@ export function createServices(
   const contentClient = content ?? new StubContentClient();
   const publishing = new PublishingService(eventLog, decisions, resolvedRegistry, accounts, products, contentClient);
   const customerService = new CustomerService(driver, decisions, orders);
+  const dashboard = new DashboardService(driver, eventLog);
   return {
     driver,
     events: eventLog,
@@ -57,5 +60,6 @@ export function createServices(
     fulfillment,
     publishing,
     customerService,
+    dashboard,
   };
 }

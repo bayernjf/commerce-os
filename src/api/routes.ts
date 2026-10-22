@@ -133,4 +133,8 @@ export function registerHttpRoutes(app: Hono, deps: { token?: string; services: 
     });
     return c.json({ events });
   });
+
+  app.get('/api/v1/dashboard', async (c) =>
+    c.json({ metrics: await services.dashboard.getMetrics() }),
+  );
 }
