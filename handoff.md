@@ -2,9 +2,16 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-23，M5 完成，自举侧过 GATE-M5）
+## Current state（2026-10-23，M6 本地部分完成，GATE-M6 外部阻塞未过门）
 
-- **基线**：15 个测试文件 / **64 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002 两份（002 客服三表）。
+- **基线**：17 个测试文件 / **73 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002 两份（002 客服三表）。
+- **M6 本地部分已完成**：
+  - 可观测性 `src/observability/`：结构化 JSON logger（错误走 stderr）、AlertReporter（stderr 结构化告警 + 可选 webhook、cooldown 去重）、readiness 探针（DB round-trip + 数据卷磁盘空间）。
+  - HTTP：`/healthz` 保持 liveness，新增 `/readyz`（真探 DB+磁盘，失败 503 并告警）；503 依赖错误（decision/content/channel）与 500 未处理错误在错误边界发告警。
+  - serve：装配 reporter、`unhandledRejection`/`uncaughtException` 告警并退出、SIGTERM/SIGINT 优雅关闭（关 server+driver，10s 安全退出）。
+  - 部署：多阶段 Dockerfile（容器内编译，跨仓 zeus-client 经 named context，COPY recordings）、`docker-compose.yml`（持久卷、healthcheck、restart、日志轮转、仅绑 loopback 由宿主反代 TLS）。
+  - **现网验证（容器级）**：compose build+up 后 healthy，healthz/readyz 200、自动迁移、写入后 restart 数据仍在；zeus 不可达时 listing 返 503 且 stderr 出 decision_unavailable 告警。
+  - **域名/TLS/真实云部署外部阻塞，未发生不冒充**。
 - **M4 已完成**：`LoomContentClient`（HTTP 调 loom content-base，替换 T-M3-07 桩，CONTENT_UNAVAILABLE 503 fail-closed）；客服模块（迁移 002 三表，规则意图分级，D2+ 转人工不自动承诺）；content-loop 闭环测试；GATE-M4 过。
 - **M5 已完成（自举侧）**：`dashboard-service.ts`（只读聚合：订单/退款/内容/净额，GMV−退款不含成本）+ GET /api/v1/dashboard（3 测试）；真实部署归 M6（T-M6-03），未发生不冒充。
 - **M3 基线**：11 个测试文件 / 48 用例全绿；`tsc -p tsconfig.build.json` 构建出 `dist/`；`check-migrations.sh` 配对通过。
@@ -36,12 +43,14 @@
 
 ## Active work（倒序）
 
-1. **M5 交付自举（2026-10-23，自举侧）**：T-M5-04 只读经营看板（`dashboard/dashboard-service.ts` + GET /api/v1/dashboard，JS 内聚合，netAmount=GMV−成功退款不含成本），3 测试；commit d6d87c8。发布接入由 agent-dev onboarding 完成（T-M5-02），真实 Preview/Production 待外部凭据（M6）。
+1. **M6 本地部分（2026-10-23，T-M6-03/04/05）**：observability（logger/AlertReporter/readiness）、/readyz 与错误边界告警、serve 优雅关闭、多阶段 Dockerfile + compose 生产形态；容器级演练 healthy、重启续跑、503 告警；live 缺凭据 HTTP 422 测试。原子提交：2c19e2b（observability）、1e83673（http readyz）、eac0151（serve）、f1fe010（deploy）、69e7fa5（live 422 测试）。**现网/真实店铺外部阻塞**。
+2. **M5 交付自举（2026-10-23，自举侧）**：T-M5-04 只读经营看板（`dashboard/dashboard-service.ts` + GET /api/v1/dashboard，JS 内聚合，netAmount=GMV−成功退款不含成本），3 测试；commit d6d87c8。发布接入由 agent-dev onboarding 完成（T-M5-02），真实 Preview/Production 待外部凭据（M6）。
 2. **M4 内容底座（2026-10-23）**：`content/loom-content-client.ts` HTTP 替换桩（dbeb0f0）；客服 `customer-service/` + 迁移 002（意图分级、D2+ 转人工）；content-loop 闭环测试（686e7e5）；GATE-M4 过。
 3. **M3 全量交付（2026-10-22）**：新建 `/Users/jiangfeng/000mycodes/commerce-os`（与六仓同级），48 测试绿、typecheck/lint/build/迁移配对全过、真实启动冒烟通过、GATE-M3 e2e 通过。~~未 commit（等用户授权）~~ **已提交（2026-10-22）**：`git init -b dev` 后 11 个英文原子提交（472ff53 脚手架 → 26b6f89 storage → f831eb7 channel → c003f64 product/order → 7aa2c9c decision → 0f2aa08 content/publishing → b847bed aftersale → 00bab44 fulfillment → 2dcf865 api → 131093e tests → 0540478 docs），作者 bayernjf 本人、无 AI co-author、**无 remote、未 push**；提交后五门（check:migrations/typecheck/lint/test/build）复跑全过。
 
-## Next（M6 前置）
+## Next（M6 外部条件 + M7）
 
-- [ ] M6 持久化与真实部署：T-M6-01 持久化（zeus 侧先行）、T-M6-03 现网部署（准备 Vercel/Cloudflare/云凭据，push 后走 agent-dev 真实 Preview/Production）
-- [ ] 抖店资质/店铺到位后，新增 live `douyin` 适配器（实现 ChannelAdapter + 凭据后端，T-M6-04）
-- [ ] 各仓 push 与真实 PR 由 owner 决定
+- [ ] M6 现网（T-M6-03，外部）：准备 Vercel/Cloudflare/云凭据 + 域名/TLS，按生产工件或 agent-dev 发布编排真做现网部署，跑 healthz/readyz
+- [ ] T-M6-04（外部）：抖店资质/店铺到位后，新增 live `douyin` 适配器（实现 ChannelAdapter 五方法 + 凭据后端），完成 1 次真实 upsert+拉单
+- [ ] T-M6-05 现网冒烟（外部）：含 D2/D3 真实审批一次，补 GATE-M6 证据后过门
+- [ ] 各仓 push 与真实 PR 由 owner 决定；GATE-M6 过门后进 M7（执行器接线）
