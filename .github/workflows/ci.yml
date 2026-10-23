@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Checkout sibling zeus repo (file: dependency zeus-client)
+      - name: "Checkout sibling zeus repo (file: dependency zeus-client)"
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/zeus
