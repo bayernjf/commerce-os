@@ -19,14 +19,13 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: "Checkout sibling zeus repo (file: dependency zeus-client)"
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/zeus
-          path: ../zeus
-          # M3 runs on a local sibling checkout; when zeus is not yet public
-          # set an SSH/deploy key secret or publish zeus-client to a registry.
-          continue-on-error: true
+      - name: "Clone and build sibling zeus (file: dependency zeus-client)"
+        run: |
+          ZEUS_DIR="$GITHUB_WORKSPACE/../zeus"
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/zeus.git "$ZEUS_DIR"
+          cd "$ZEUS_DIR"
+          npm ci
+          npm run build
 
       - name: Install dependencies
         run: npm install
