@@ -86,6 +86,6 @@ npm start                  # http://127.0.0.1:8787 （node --experimental-sqlite
 
 ## 关联文档
 
-- `../Tier0-深度分析/Tier0-组合级PRD.md`（§11 五项拍板：自营、通道先走桩/沙箱、D2、500/5000、M1→M5 串行）
-- `../Tier0-深度分析/Tier0-设计文档.md`（§4.6 通道契约、§5.2 数据模型、§6.3/§6.4 流程）
-- `../Tier0-深度分析/Tier0-落码任务列表.md`（T-M3-01 ~ T-M3-10、GATE-M3）
+- `../bayjf/docs/tier0/Tier0-组合级PRD.md`（§11 五项拍板：自营、通道先走桩/沙箱、D2、500/5000、M1→M5 串行）
+- `../bayjf/docs/tier0/Tier0-设计文档.md`（§4.6 通道契约、§5.2 数据模型、§6.3/§6.4 流程）
+- `../bayjf/docs/tier0/Tier0-落码任务列表.md`（T-M3-01 ~ T-M3-10、GATE-M3）
