@@ -139,6 +139,10 @@ export function registerHttpRoutes(
     return c.json({ result });
   });
 
+  // ---- Published content (read-only projection) --------------------------
+  app.get('/api/v1/content', async (c) => c.json({ content: await services.contentReadModel.listContent() }));
+  app.get('/api/v1/content/:id', async (c) => c.json({ content: await services.contentReadModel.getContent(c.req.param('id')) }));
+
   // ---- Local audit event stream ----------------------------------------
   app.get('/api/v1/events', async (c) => {
     const refType = c.req.query('refType');

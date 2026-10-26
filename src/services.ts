@@ -11,6 +11,7 @@ import { StubContentClient } from './content/stub-content-client.js';
 import type { ContentClient } from './content/types.js';
 import { CustomerService } from './customer-service/customer-service.js';
 import { DashboardService } from './dashboard/dashboard-service.js';
+import { ContentReadModel } from './content/content-read-model.js';
 import { PublishingService } from './publishing/publishing-service.js';
 import type { DecisionPort } from './decision/types.js';
 
@@ -26,6 +27,7 @@ export interface CommerceServices {
   publishing: PublishingService;
   customerService: CustomerService;
   dashboard: DashboardService;
+  contentReadModel: ContentReadModel;
 }
 
 /**
@@ -49,6 +51,7 @@ export function createServices(
   const publishing = new PublishingService(eventLog, decisions, resolvedRegistry, accounts, products, contentClient);
   const customerService = new CustomerService(driver, decisions, orders);
   const dashboard = new DashboardService(driver, eventLog);
+  const contentReadModel = new ContentReadModel(eventLog);
   return {
     driver,
     events: eventLog,
@@ -61,5 +64,6 @@ export function createServices(
     publishing,
     customerService,
     dashboard,
+    contentReadModel,
   };
 }
