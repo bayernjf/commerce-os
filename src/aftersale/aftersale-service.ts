@@ -199,6 +199,18 @@ export class AftersaleService {
   async getRefund(id: string): Promise<Refund> {
     const row = await this.driver.get<Record<string, unknown>>('SELECT * FROM refunds WHERE id = ?', [id]);
     if (!row) throw new CommerceError('NOT_FOUND', `refund not found: ${id}`, false, { refundId: id });
+    return this.mapRefund(row);
+  }
+
+  /** Read-only list, newest rows last (same order as the other domain lists). */
+  async listRefunds(): Promise<Refund[]> {
+    const rows = await this.driver.all<Record<string, unknown>>('SELECT id FROM refunds ORDER BY created_at ASC', []);
+    const refunds: Refund[] = [];
+    for (const r of rows) refunds.push(await this.getRefund(String(r.id)));
+    return refunds;
+  }
+
+  private mapRefund(row: Record<string, unknown>): Refund {
     let lines: Refund['lines'] = [];
     try {
       lines = JSON.parse(String(row.lines_json)) as Refund['lines'];

@@ -110,6 +110,7 @@ export function registerHttpRoutes(
     const refund = await services.aftersales.decideRefund(c.req.param('id'), body.verdict, body.approver, body.comment);
     return c.json({ refund });
   });
+  app.get('/api/v1/refunds', async (c) => c.json({ refunds: await services.aftersales.listRefunds() }));
   app.get('/api/v1/refunds/:id', async (c) => c.json({ refund: await services.aftersales.getRefund(c.req.param('id')) }));
 
   // ---- Listings (content + publish) ------------------------------------
