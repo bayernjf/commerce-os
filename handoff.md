@@ -2,9 +2,9 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-23，M6 本地部分完成，GATE-M6 外部阻塞未过门）
+## Current state（2026-10-26，运营只读缺口关闭；GATE-M6 外部阻塞未过门）
 
-- **基线**：17 个测试文件 / **73 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002 两份（002 客服三表）。
+- **基线**：18 个测试文件 / **83 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002 两份（002 客服三表，未新增迁移）。
 - **M6 本地部分已完成**：
   - 可观测性 `src/observability/`：结构化 JSON logger（错误走 stderr）、AlertReporter（stderr 结构化告警 + 可选 webhook、cooldown 去重）、readiness 探针（DB round-trip + 数据卷磁盘空间）。
   - HTTP：`/healthz` 保持 liveness，新增 `/readyz`（真探 DB+磁盘，失败 503 并告警）；503 依赖错误（decision/content/channel）与 500 未处理错误在错误边界发告警。
@@ -43,6 +43,13 @@
 
 ## Active work（倒序）
 
+0. **运营只读缺口关闭（2026-10-26，ops-console T-M8 登记的 commerce 内核缺口）**：
+   - `GET /api/v1/refunds` 列表（`AftersaleService.listRefunds()`，ids 逐行 map，与 listOrders 同形）——此前只有 `GET /api/v1/refunds/:id` 详情。
+   - `GET /api/v1/content` 列表 + `GET /api/v1/content/:id` 详情（`src/content/content-read-model.ts`，只读投影 `product.listed` 事件，详情按 payload.externalContentId 读取，未命中 404 NOT_FOUND）——此前控制台只能从事件流 + dashboard `content.published` 口径派生。
+   - 两个家族均为纯只读，Bearer 中间件已覆盖 `/api/v1/*`；每端点带 HTTP 级测试（空列表/种子读回/未知 id 404/无 token 401/正确 token 200）。
+   - 门结果：`check:migrations` OK（未动迁移）、`typecheck` 0 错、`lint` 0 错、`vitest run` **18 文件 / 83 用例全绿**（原 73 + 新增 9）、`build` 成功。
+   - 提交：`4c07a40` feat(refunds)、`032d36d` feat(content)、`c25482b` test(read-lists)、`本提交 docs`。
+   - 未做 ops-console 前端接线（本仓边界外）；ops-console 侧可在下一批把内容页从事件流派生切到 `/api/v1/content`。
 1. **M6 本地部分（2026-10-23，T-M6-03/04/05）**：observability（logger/AlertReporter/readiness）、/readyz 与错误边界告警、serve 优雅关闭、多阶段 Dockerfile + compose 生产形态；容器级演练 healthy、重启续跑、503 告警；live 缺凭据 HTTP 422 测试。原子提交：2c19e2b（observability）、1e83673（http readyz）、eac0151（serve）、f1fe010（deploy）、69e7fa5（live 422 测试）。**现网/真实店铺外部阻塞**。
 2. **M5 交付自举（2026-10-23，自举侧）**：T-M5-04 只读经营看板（`dashboard/dashboard-service.ts` + GET /api/v1/dashboard，JS 内聚合，netAmount=GMV−成功退款不含成本），3 测试；commit d6d87c8。发布接入由 agent-dev onboarding 完成（T-M5-02），真实 Preview/Production 待外部凭据（M6）。
 2. **M4 内容底座（2026-10-23）**：`content/loom-content-client.ts` HTTP 替换桩（dbeb0f0）；客服 `customer-service/` + 迁移 002（意图分级、D2+ 转人工）；content-loop 闭环测试（686e7e5）；GATE-M4 过。
