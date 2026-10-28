@@ -2,9 +2,9 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-26，运营只读缺口关闭；GATE-M6 外部阻塞未过门）
+## Current state（2026-10-28，storefront 迁移 003 落码；GATE-M6 外部阻塞未过门）
 
-- **基线**：18 个测试文件 / **83 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002 两份（002 客服三表，未新增迁移）。
+- **基线**：18 个测试文件 / **83 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002/003 三份（003 storefront 五表，见 Active work）。
 - **M6 本地部分已完成**：
   - 可观测性 `src/observability/`：结构化 JSON logger（错误走 stderr）、AlertReporter（stderr 结构化告警 + 可选 webhook、cooldown 去重）、readiness 探针（DB round-trip + 数据卷磁盘空间）。
   - HTTP：`/healthz` 保持 liveness，新增 `/readyz`（真探 DB+磁盘，失败 503 并告警）；503 依赖错误（decision/content/channel）与 500 未处理错误在错误边界发告警。
@@ -43,7 +43,12 @@
 
 ## Active work（倒序）
 
-0. **运营只读缺口关闭（2026-10-26，ops-console T-M8 登记的 commerce 内核缺口）**：
+0. **storefront 工作包启动（2026-10-28，独立站双用方案 v1.0 D2=B 拍板）**：
+   - `feature/storefront` 分支（基于 dev）；迁移 003 五表：`merchants`（租户预留 D1=A）/ `carts` / `cart_items` / `checkouts` / `payments`（金额微元整数），sqlite + postgres 双方言配对，`check:migrations` OK（3/3）。
+   - 提交：`07c907c` feat(storefront)、`30b599e` test(migrations)。
+   - 门结果：五门全绿（18 文件 / 83 用例；migrations.test.ts 期望列表已含 003）。
+   - 待续：SF-02 catalog 投影 → SF-14（详细任务见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md`）。
+1. **运营只读缺口关闭（2026-10-26，ops-console T-M8 登记的 commerce 内核缺口）**：
    - `GET /api/v1/refunds` 列表（`AftersaleService.listRefunds()`，ids 逐行 map，与 listOrders 同形）——此前只有 `GET /api/v1/refunds/:id` 详情。
    - `GET /api/v1/content` 列表 + `GET /api/v1/content/:id` 详情（`src/content/content-read-model.ts`，只读投影 `product.listed` 事件，详情按 payload.externalContentId 读取，未命中 404 NOT_FOUND）——此前控制台只能从事件流 + dashboard `content.published` 口径派生。
    - 两个家族均为纯只读，Bearer 中间件已覆盖 `/api/v1/*`；每端点带 HTTP 级测试（空列表/种子读回/未知 id 404/无 token 401/正确 token 200）。
@@ -55,8 +60,9 @@
 2. **M4 内容底座（2026-10-23）**：`content/loom-content-client.ts` HTTP 替换桩（dbeb0f0）；客服 `customer-service/` + 迁移 002（意图分级、D2+ 转人工）；content-loop 闭环测试（686e7e5）；GATE-M4 过。
 3. **M3 全量交付（2026-10-22）**：新建 `/Users/jiangfeng/000mycodes/commerce-os`（与六仓同级），48 测试绿、typecheck/lint/build/迁移配对全过、真实启动冒烟通过、GATE-M3 e2e 通过。~~未 commit（等用户授权）~~ **已提交（2026-10-22）**：`git init -b dev` 后 11 个英文原子提交（472ff53 脚手架 → 26b6f89 storage → f831eb7 channel → c003f64 product/order → 7aa2c9c decision → 0f2aa08 content/publishing → b847bed aftersale → 00bab44 fulfillment → 2dcf865 api → 131093e tests → 0540478 docs），作者 bayernjf 本人、无 AI co-author、**无 remote、未 push**；提交后五门（check:migrations/typecheck/lint/test/build）复跑全过。
 
-## Next（M6 外部条件 + M7）
+## Next（M6 外部条件 + M7 + storefront）
 
+- [ ] **storefront SF-02~SF-14（2026-10-28 起）**：迁移 003 已就绪；下一任务 SF-02 storefront catalog 只读投影（复用 `product.listed`），依次到 SF-14（GATE-S1 真实进程 e2e + ops-console 接线）。详见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md` M1。
 - [ ] M6 现网（T-M6-03，外部）：准备 Vercel/Cloudflare/云凭据 + 域名/TLS，按生产工件或 agent-dev 发布编排真做现网部署，跑 healthz/readyz
 - [ ] T-M6-04（外部）：抖店资质/店铺到位后，新增 live `douyin` 适配器（实现 ChannelAdapter 五方法 + 凭据后端），完成 1 次真实 upsert+拉单
 - [ ] T-M6-05 现网冒烟（外部）：含 D2/D3 真实审批一次，补 GATE-M6 证据后过门
