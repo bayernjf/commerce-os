@@ -122,4 +122,34 @@ describe('storefront order status + refunds (SF-12)', () => {
     });
     expect(noItem.status).toBe(400);
   });
+
+  it('settles an approved refund through the storefront fake payout', async () => {
+    const { cartId, token, orderItemId } = await paidCart();
+    const headers = { 'content-type': 'application/json', authorization: `Cart ${token}` };
+    const res = await app.request(`/api/v1/storefront/carts/${cartId}/refunds`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ reason: '退款闭环验证', orderItemId }),
+    });
+    expect(res.status).toBe(423);
+    const { refund } = (await res.json()) as { refund: { id: string } };
+    const refundId = refund.id;
+
+    const decision = await app.request(`/api/v1/refunds/${refundId}/decision`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ verdict: 'approve', approver: 'owner' }),
+    });
+    expect(decision.status).toBe(200);
+    const { refund: settled } = (await decision.json()) as {
+      refund: { status: string; externalRefundRef?: string };
+    };
+    expect(settled.status).toBe('succeeded');
+    expect(settled.externalRefundRef).toContain('fake-refund-');
+
+    const listRes = await app.request(`/api/v1/storefront/carts/${cartId}/refunds`, { headers });
+    const { refunds } = (await listRes.json()) as { refunds: { id: string; status: string }[] };
+    const entry = refunds.find((r) => r.id === refundId);
+    expect(entry?.status).toBe('succeeded');
+  });
 });
