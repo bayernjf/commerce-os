@@ -37,7 +37,7 @@ export function registerHttpRoutes(
       if (status === 503 && alertKind) {
         deps.reporter?.report(alertKind, 'warning', err.message, { code: err.code });
       }
-      return c.json({ error: errorBody(err) }, status as 400 | 404 | 409 | 422 | 423 | 501 | 503);
+      return c.json({ error: errorBody(err) }, status as 400 | 401 | 404 | 409 | 422 | 423 | 501 | 503);
     }
     deps.reporter?.report('process_fatal', 'critical', `unhandled error: ${(err as Error).message}`);
     return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message, retryable: false } }, 500);
