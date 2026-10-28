@@ -153,4 +153,41 @@ describe('storefront HTTP layer (SF-08)', () => {
     });
     expect(webhookPublic.status).toBe(200);
   });
+
+  it('answers CORS preflight and echoes the local dev origin by default', async () => {
+    const preflight = await app.request('/api/v1/storefront/catalog', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://localhost:4321',
+        'access-control-request-method': 'GET',
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('http://localhost:4321');
+    expect(preflight.headers.get('access-control-allow-headers')).toContain('Authorization');
+
+    const simple = await app.request('/api/v1/storefront/catalog', {
+      headers: { origin: 'http://localhost:4321' },
+    });
+    expect(simple.status).toBe(200);
+    expect(simple.headers.get('access-control-allow-origin')).toBe('http://localhost:4321');
+  });
+
+  it('only allows explicitly configured origins when allowedOrigins is set', async () => {
+    const locked = createApp({
+      services: h.services,
+      allowedOrigins: ['https://shop.example.com'],
+      storefrontCartSecret: CART_SECRET,
+    });
+    const denied = await locked.request('/api/v1/storefront/catalog', {
+      headers: { origin: 'http://localhost:4321' },
+    });
+    expect(denied.status).toBe(200);
+    expect(denied.headers.get('access-control-allow-origin')).toBeNull();
+
+    const allowed = await locked.request('/api/v1/storefront/catalog', {
+      headers: { origin: 'https://shop.example.com' },
+    });
+    expect(allowed.headers.get('access-control-allow-origin')).toBe('https://shop.example.com');
+  });
 });
