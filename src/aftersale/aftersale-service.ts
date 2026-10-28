@@ -210,6 +210,17 @@ export class AftersaleService {
     return refunds;
   }
 
+  /** Refunds for one order, newest first (shopper-facing order status page). */
+  async listRefundsForOrder(orderId: string): Promise<Refund[]> {
+    const rows = await this.driver.all<Record<string, unknown>>(
+      'SELECT id FROM refunds WHERE order_id = ? ORDER BY created_at DESC',
+      [orderId],
+    );
+    const refunds: Refund[] = [];
+    for (const r of rows) refunds.push(await this.getRefund(String(r.id)));
+    return refunds;
+  }
+
   private mapRefund(row: Record<string, unknown>): Refund {
     let lines: Refund['lines'] = [];
     try {

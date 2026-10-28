@@ -124,6 +124,15 @@ export class OrderService {
     return this.mapOrder(row, lineRows);
   }
 
+  /** Resolve an order by its external reference (storefront: sf-{cartId}). */
+  async getOrderByExternalId(externalOrderId: string): Promise<Order> {
+    const row = await this.driver.get<Record<string, unknown>>('SELECT id FROM orders WHERE external_order_id = ?', [externalOrderId]);
+    if (!row) {
+      throw new CommerceError('NOT_FOUND', `order not found for external ref: ${externalOrderId}`, false, { externalOrderId });
+    }
+    return this.getOrder(String(row.id));
+  }
+
   async listOrders(): Promise<Order[]> {
     const rows = await this.driver.all<Record<string, unknown>>('SELECT id FROM orders ORDER BY created_at ASC');
     const orders: Order[] = [];
