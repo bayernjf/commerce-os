@@ -1,7 +1,10 @@
 ---
 import { fetchCatalogItem, formatPrice } from '../../lib/api';
+import CartIsland from '../../components/CartIsland';
 const productId = Astro.params.id ?? '';
 const item = await fetchCatalogItem(productId);
+const apiBase = process.env.COMMERCE_API_BASE_URL ?? 'http://127.0.0.1:8787';
+const firstSku = item?.skus[0];
 ---
 <html lang="zh">
   <head>
@@ -48,7 +51,19 @@ const item = await fetchCatalogItem(productId);
               ))}
             </tbody>
           </table>
-          <div class="notice">购物车与结算交互岛在 SF-11 接入；当前为 SSR 只读骨架。</div>
+          <div style="margin-top:20px;">
+            {
+              item && firstSku ? (
+                <CartIsland
+                  client:load
+                  productId={item.productId}
+                  skuId={firstSku.id}
+                  priceLabel={formatPrice(firstSku.price, firstSku.currency)}
+                  apiBase={apiBase}
+                />
+              ) : null
+            }
+          </div>
         </main>
       ) : (
         <div class="not-found">

@@ -69,6 +69,9 @@ async function main(): Promise<void> {
     ...(process.env.COMMERCE_WEBHOOK_FAKE_SECRET
       ? { webhookSecrets: { fake: process.env.COMMERCE_WEBHOOK_FAKE_SECRET } }
       : {}),
+    ...(process.env.COMMERCE_ALLOWED_ORIGINS
+      ? { allowedOrigins: process.env.COMMERCE_ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) }
+      : {}),
     services,
     reporter,
     ...(dataDir ? { dataDir } : {}),

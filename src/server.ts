@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { CommerceServices } from './services.js';
 import { registerHttpRoutes } from './api/routes.js';
 import type { AlertReporter } from './observability/alerts.js';
@@ -14,13 +15,31 @@ export interface CommerceAppDeps {
   reporter?: AlertReporter;
   /** Data volume directory, used for the disk readiness probe. */
   dataDir?: string;
+  /**
+   * Browser origins allowed for /api/v1/*. Defaults to local dev origins
+   * (Astro dev/preview on 4321); production must set COMMERCE_ALLOWED_ORIGINS.
+   */
+  allowedOrigins?: string[];
 }
+
+const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:4321', 'http://127.0.0.1:4321'];
 
 /**
  * Build the Hono app. Pure factory: no socket is opened here.
  */
 export function createApp(deps: CommerceAppDeps): Hono {
   const app = new Hono();
+
+  // Browser cross-origin access for the storefront islands (cart/checkout).
+  // Origin allow-list: explicit env in production, local dev default here.
+  app.use(
+    '/api/v1/*',
+    cors({
+      origin: deps.allowedOrigins?.length ? deps.allowedOrigins : DEFAULT_ALLOWED_ORIGINS,
+      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      allowHeaders: ['Content-Type', 'Authorization'],
+    }),
+  );
 
   // Liveness: process is up. No dependency probes here so a transiently
   // failing dependency does not get the container killed (restart loop).
