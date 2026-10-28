@@ -105,6 +105,20 @@ export function registerHttpRoutes(
     });
   }
 
+  // ---- Storefront checkout decisions (ops Bearer; D3 approval resumes) ---
+  app.post('/api/v1/storefront/checkouts/:decisionId/approve', async (c) => {
+    const body = (await c.req.json()) as { approver: string; comment?: string };
+    if (!body.approver?.trim()) throw new CommerceError('VALIDATION_FAILED', 'approver is required');
+    const checkout = await services.storefrontCheckouts.approveCheckout(c.req.param('decisionId'), body.approver, body.comment);
+    return c.json({ checkout });
+  });
+  app.post('/api/v1/storefront/checkouts/:decisionId/reject', async (c) => {
+    const body = (await c.req.json()) as { approver: string; comment?: string };
+    if (!body.approver?.trim()) throw new CommerceError('VALIDATION_FAILED', 'approver is required');
+    const result = await services.storefrontCheckouts.rejectCheckout(c.req.param('decisionId'), body.approver, body.comment);
+    return c.json({ result });
+  });
+
   app.onError((err, c) => {
     if (err instanceof CommerceError) {
       const status = httpStatusFor(err.code);

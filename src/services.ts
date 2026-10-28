@@ -67,7 +67,7 @@ export function createServices(
   payments.register(new FakePaymentProvider());
   const storefrontCatalog = new StorefrontCatalogService(driver);
   const storefrontCarts = new CartService(driver);
-  const storefrontCheckouts = new CheckoutService(driver, storefrontCarts, orders, payments);
+  const storefrontCheckouts = new CheckoutService(driver, storefrontCarts, orders, payments, decisions, eventLog);
   const storefrontWebhooks = new WebhookService(driver, eventLog);
   return {
     driver,
