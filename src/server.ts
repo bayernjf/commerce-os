@@ -6,6 +6,10 @@ import { checkReadiness } from './observability/readiness.js';
 
 export interface CommerceAppDeps {
   token?: string;
+  /** Secret for stateless storefront cart tokens (Cart <token> scheme). */
+  storefrontCartSecret?: string;
+  /** Per-provider webhook HMAC secrets, keyed by provider name. */
+  webhookSecrets?: Record<string, string>;
   services: CommerceServices;
   reporter?: AlertReporter;
   /** Data volume directory, used for the disk readiness probe. */

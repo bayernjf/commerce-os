@@ -1,7 +1,8 @@
-import type { Hono } from 'hono';
+import type { Hono, Context } from 'hono';
 import { CommerceError, errorBody, httpStatusFor, type CommerceErrorCode } from '../util/errors.js';
 import type { CommerceServices } from '../services.js';
 import type { AlertKind, AlertReporter } from '../observability/alerts.js';
+import { issueCartToken, verifyCartToken } from '../storefront/cart-token.js';
 
 /** Map a retryable dependency error to its alert kind. */
 const ALERT_BY_CODE: Partial<Record<CommerceErrorCode, AlertKind>> = {
@@ -16,9 +17,83 @@ const ALERT_BY_CODE: Partial<Record<CommerceErrorCode, AlertKind>> = {
  */
 export function registerHttpRoutes(
   app: Hono,
-  deps: { token?: string; services: CommerceServices; reporter?: AlertReporter },
+  deps: {
+    token?: string;
+    storefrontCartSecret?: string;
+    webhookSecrets?: Record<string, string>;
+    services: CommerceServices;
+    reporter?: AlertReporter;
+  },
 ): void {
   const { services } = deps;
+
+  // ---- Storefront: public read + cart token (separate from ops Bearer) ---
+  // Registered before the ops Bearer middleware so catalog and webhook stay
+  // public and cart sessions use the `Cart <token>` scheme, never Bearer.
+  const cartGuard = async (c: Context, next: () => Promise<void>) => {
+    const cartId = c.req.param('id') ?? '';
+    const secret = deps.storefrontCartSecret ?? '';
+    const match = /^Cart ([a-f0-9]+)$/i.exec(c.req.header('Authorization') ?? '');
+    if (!secret || !match || !verifyCartToken(cartId, match[1] ?? '', secret)) {
+      return c.json(
+        { error: { code: 'UNAUTHORIZED', message: 'missing or invalid cart token', retryable: false } },
+        401 as const,
+      );
+    }
+    await next();
+  };
+  app.use('/api/v1/storefront/carts/:id', cartGuard);
+  app.use('/api/v1/storefront/carts/:id/*', cartGuard);
+
+  app.get('/api/v1/storefront/catalog', async (c) => c.json({ catalog: await services.storefrontCatalog.listCatalog() }));
+  app.get('/api/v1/storefront/catalog/:id', async (c) => c.json({ item: await services.storefrontCatalog.getCatalogItem(c.req.param('id')) }));
+
+  app.post('/api/v1/storefront/carts', async (c) => {
+    const cart = await services.storefrontCarts.createCart({ merchantId: 'mer_owner' });
+    const token = deps.storefrontCartSecret ? issueCartToken(cart.id, deps.storefrontCartSecret) : undefined;
+    return c.json({ cart, ...(token ? { cartToken: token } : {}) }, 201);
+  });
+  app.get('/api/v1/storefront/carts/:id', async (c) => {
+    const cart = await services.storefrontCarts.getCart(c.req.param('id'));
+    const items = await services.storefrontCarts.listItems(cart.id);
+    return c.json({ cart, items });
+  });
+  app.post('/api/v1/storefront/carts/:id/items', async (c) => {
+    const body = (await c.req.json()) as { productId: string; skuId: string; qty: number };
+    const items = await services.storefrontCarts.addItem(c.req.param('id'), body);
+    return c.json({ items }, 201);
+  });
+  app.post('/api/v1/storefront/carts/:id/checkout', async (c) => {
+    const body = (await c.req.json()) as { provider?: string };
+    const checkout = await services.storefrontCheckouts.checkout(c.req.param('id'), body.provider ?? 'fake');
+    return c.json({ checkout }, 201);
+  });
+
+  app.post('/api/v1/storefront/webhooks/:provider', async (c) => {
+    const provider = c.req.param('provider');
+    const secret = deps.webhookSecrets?.[provider];
+    if (!secret) {
+      throw new CommerceError('CREDENTIAL_MISSING', `webhook secret not configured for '${provider}'`, false, { provider });
+    }
+    const body = (await c.req.json()) as {
+      deliveryId?: string;
+      paymentId?: string;
+      payload?: Record<string, unknown>;
+      signature?: string;
+    };
+    if (!body.deliveryId || !body.payload || !body.signature) {
+      throw new CommerceError('VALIDATION_FAILED', 'deliveryId, payload and signature are required');
+    }
+    const result = await services.storefrontWebhooks.handleDelivery({
+      provider,
+      secret,
+      deliveryId: body.deliveryId,
+      ...(body.paymentId ? { paymentId: body.paymentId } : {}),
+      payload: body.payload,
+      signature: body.signature,
+    });
+    return c.json({ result });
+  });
 
   if (deps.token) {
     app.use('/api/v1/*', async (c, next) => {

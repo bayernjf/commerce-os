@@ -63,6 +63,12 @@ async function main(): Promise<void> {
 
   const app = createApp({
     ...(process.env.COMMERCE_API_TOKEN ? { token: process.env.COMMERCE_API_TOKEN } : {}),
+    ...(process.env.COMMERCE_STOREFRONT_CART_SECRET
+      ? { storefrontCartSecret: process.env.COMMERCE_STOREFRONT_CART_SECRET }
+      : {}),
+    ...(process.env.COMMERCE_WEBHOOK_FAKE_SECRET
+      ? { webhookSecrets: { fake: process.env.COMMERCE_WEBHOOK_FAKE_SECRET } }
+      : {}),
     services,
     reporter,
     ...(dataDir ? { dataDir } : {}),
