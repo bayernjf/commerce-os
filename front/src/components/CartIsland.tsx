@@ -183,6 +183,7 @@ export default function CartIsland({ productId, skuId, priceLabel, apiBase }: Ca
             <div style={{ border: '1px solid #059669', background: '#ecfdf5', color: '#065f46', borderRadius: 8, padding: 10, fontSize: 13 }}>
               <strong>支付成功 🎉</strong>
               <div>订单号：{checkout.orderId} · 实付 {fmt(checkout.totalMicros)}</div>
+              {cartId ? <div><a href={`/orders/${cartId}`} style={{ color: '#065f46', fontWeight: 600 }}>查看订单详情 →</a></div> : null}
             </div>
           ) : checkout.kind === 'failed' ? (
             <div style={{ border: '1px solid #dc2626', background: '#fef2f2', color: '#991b1b', borderRadius: 8, padding: 10, fontSize: 13 }}>
