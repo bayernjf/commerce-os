@@ -2,9 +2,9 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-28，storefront SF-01~06 完成；GATE-M6 外部阻塞未过门）
+## Current state（2026-10-28，storefront SF-01~07 完成；GATE-M6 外部阻塞未过门）
 
-- **基线**：23 个测试文件 / **106 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002/003 三份（003 storefront 五表 + L0 owner 种子，见 Active work）。
+- **基线**：24 个测试文件 / **110 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002/003/004 四份（003 storefront 五表 + L0 owner 种子、004 webhook_deliveries，见 Active work）。
 - **M6 本地部分已完成**：
   - 可观测性 `src/observability/`：结构化 JSON logger（错误走 stderr）、AlertReporter（stderr 结构化告警 + 可选 webhook、cooldown 去重）、readiness 探针（DB round-trip + 数据卷磁盘空间）。
   - HTTP：`/healthz` 保持 liveness，新增 `/readyz`（真探 DB+磁盘，失败 503 并告警）；503 依赖错误（decision/content/channel）与 500 未处理错误在错误边界发告警。
@@ -51,8 +51,9 @@
    - **SF-05 payment port + fake provider**：`payment-port.ts`（create/confirm/refund/getStatus/verifyWebhook，端口不持本地持久化，对齐 ChannelAdapter）+ `fake-payment-provider.ts`（确定性脚本回放，无网络，sandbox=true）。提交 `b6a9ac8` feat + `09aab7d` test。
    - **SF-06 provider registry**：`payment-registry.ts` fail-closed（未注册 → CREDENTIAL_MISSING 422，绝不静默回退 fake）；PaymentPort 增 sandbox 标记。提交 `c83397f` feat + `7857ed0` test。
    - **SF-04 checkout**：`checkout-service.ts` cart 校验 → 幂等生单（channel=storefront，external_order_id=`sf-{cartId}`，重复结算返回已有 checkout 不重复生单）→ PaymentPort.create/confirm → paid/failed 状态机；paid 关 cart 置 checked_out；D3 挂起留 SF-09。提交 `d739a6b` feat + `2843268` test。
-   - 门结果：五门全绿（**23 文件 / 106 用例**；迁移测试期望列表含 003）。
-   - 待续：SF-07 webhook → SF-14（详细任务见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md` M1）。
+   - **SF-07 webhook**：迁移 004 `webhook_deliveries`（(provider, delivery_id) 唯一）；`webhook-service.ts` HMAC-SHA256 验签（坏签名 401 + rejected 留痕）、delivery 幂等（重复投递不重复处理）、`payment.webhook_delivered` 审计事件；新增错误码 `WEBHOOK_SIGNATURE_INVALID`→401。提交 `931b6fe` feat + `691ec8a` test。
+   - 门结果：五门全绿（**24 文件 / 110 用例**；迁移配对 4/4）。
+   - 待续：SF-08 HTTP 层 → SF-14（详细任务见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md` M1）。
 1. **运营只读缺口关闭（2026-10-26，ops-console T-M8 登记的 commerce 内核缺口）**：
    - `GET /api/v1/refunds` 列表（`AftersaleService.listRefunds()`，ids 逐行 map，与 listOrders 同形）——此前只有 `GET /api/v1/refunds/:id` 详情。
    - `GET /api/v1/content` 列表 + `GET /api/v1/content/:id` 详情（`src/content/content-read-model.ts`，只读投影 `product.listed` 事件，详情按 payload.externalContentId 读取，未命中 404 NOT_FOUND）——此前控制台只能从事件流 + dashboard `content.published` 口径派生。
@@ -67,7 +68,7 @@
 
 ## Next（M6 外部条件 + M7 + storefront）
 
-- [ ] **storefront SF-07~SF-14（2026-10-28 起）**：SF-01~06 已落地（迁移 003 + catalog/cart/checkout 服务 + payment port/registry）；下一任务 SF-07 payments webhook（HMAC 验签 + delivery 幂等 + 事件审计）。详见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md` M1。
+- [ ] **storefront SF-08~SF-14（2026-10-28 起）**：SF-01~07 已落地（迁移 003/004 + catalog/cart/checkout/webhook 服务 + payment port/registry）；下一任务 SF-08 `/api/v1/storefront/*` HTTP 层 + 鉴权（公开只读 + cart token；Bearer 分离）。详见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md` M1。
 - [ ] M6 现网（T-M6-03，外部）：准备 Vercel/Cloudflare/云凭据 + 域名/TLS，按生产工件或 agent-dev 发布编排真做现网部署，跑 healthz/readyz
 - [ ] T-M6-04（外部）：抖店资质/店铺到位后，新增 live `douyin` 适配器（实现 ChannelAdapter 五方法 + 凭据后端），完成 1 次真实 upsert+拉单
 - [ ] T-M6-05 现网冒烟（外部）：含 D2/D3 真实审批一次，补 GATE-M6 证据后过门
