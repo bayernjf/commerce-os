@@ -1,0 +1,62 @@
+---
+import { fetchCatalogItem, formatPrice } from '../../lib/api';
+const productId = Astro.params.id ?? '';
+const item = await fetchCatalogItem(productId);
+---
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{item ? `${item.title} · Bay 店铺` : '商品不存在 · Bay 店铺'}</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: -apple-system, 'PingFang SC', 'Noto Sans CJK SC', sans-serif; color: #1f2937; background: #fff; }
+      header { display: flex; align-items: center; justify-content: space-between; padding: 16px 24px; border-bottom: 1px solid #e5e7eb; }
+      header .brand { font-weight: 700; font-size: 18px; }
+      header nav a { margin-left: 16px; color: #374151; text-decoration: none; font-size: 14px; }
+      main { max-width: 720px; margin: 0 auto; padding: 32px 24px; }
+      h1 { font-size: 26px; margin: 0 0 16px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 14px; }
+      th { color: #6b7280; font-weight: 500; }
+      .price { color: #b45309; font-weight: 700; }
+      .notice { padding: 12px 16px; border-radius: 8px; background: #f3f4f6; color: #6b7280; font-size: 13px; margin-top: 24px; }
+      .not-found { text-align: center; padding: 64px 24px; color: #9ca3af; }
+      footer { padding: 24px; text-align: center; color: #9ca3af; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="brand">Bay 店铺</span>
+      <nav><a href="/">首页</a><a href="/catalog">全部商品</a></nav>
+    </header>
+    {
+      item ? (
+        <main>
+          <a href="/catalog" style="color:#6b7280;font-size:13px;text-decoration:none;">← 返回全部商品</a>
+          <h1>{item.title}</h1>
+          <table>
+            <thead><tr><th>规格</th><th>SKU</th><th>价格</th></tr></thead>
+            <tbody>
+              {item.skus.map((sku) => (
+                <tr>
+                  <td>{Object.entries(sku.specs).map(([k, v]) => `${k}: ${String(v)}`).join(' / ') || '默认'}</td>
+                  <td>{sku.skuCode}</td>
+                  <td class="price">{formatPrice(sku.price, sku.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div class="notice">购物车与结算交互岛在 SF-11 接入；当前为 SSR 只读骨架。</div>
+        </main>
+      ) : (
+        <div class="not-found">
+          <h1>商品不存在或已下架</h1>
+          <p><a href="/catalog" style="color:#374151;">返回全部商品</a></p>
+        </div>
+      )
+    }
+    <footer>Bay storefront · Astro SSR · data: commerce-os /api/v1/storefront/catalog/:id</footer>
+  </body>
+</html>
