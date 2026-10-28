@@ -24,6 +24,8 @@ export interface CreatePaymentInput {
 
 export interface PaymentPort {
   readonly provider: string;
+  /** Sandbox providers never touch real money; live providers require credentials. */
+  readonly sandbox: boolean;
   create(input: CreatePaymentInput): Promise<PaymentGatewayIntent>;
   confirm(paymentId: string): Promise<PaymentGatewayIntent>;
   refund(paymentId: string, amountMicros: number): Promise<PaymentGatewayIntent>;

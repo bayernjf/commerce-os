@@ -24,6 +24,7 @@ function validationError(message: string, details?: Record<string, unknown>): Co
 
 export class FakePaymentProvider implements PaymentPort {
   readonly provider = 'fake';
+  readonly sandbox = true;
   private readonly state = new Map<string, PaymentGatewayIntent>();
 
   constructor(private readonly script: FakePaymentScript = {}) {}
