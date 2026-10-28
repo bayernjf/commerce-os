@@ -9,6 +9,15 @@ import { CheckoutService } from '../src/storefront/checkout-service.js';
 import { OrderService } from '../src/order/order-service.js';
 import { ChannelAccountService } from '../src/channel/channel-account-service.js';
 import { createDefaultRegistry } from '../src/channel/index.js';
+import type { DecisionPort } from '../src/decision/types.js';
+
+function decidedPort(): DecisionPort {
+  return {
+    decide: async () => ({ decisionId: 'dec_test', grade: 'D0', mode: 'auto', status: 'decided', ruleId: 'test' }),
+    approve: async (id) => ({ decisionId: id, grade: 'D0', mode: 'auto', status: 'decided' }),
+    reject: async (id) => ({ decisionId: id, grade: 'D0', mode: 'auto', status: 'rejected' }),
+  };
+}
 
 describe('storefront checkout service (SF-04)', () => {
   let driver: SqliteDriver;
@@ -28,7 +37,7 @@ describe('storefront checkout service (SF-04)', () => {
     orders = new OrderService(driver, registry, accounts, eventLog);
     const payments = new PaymentRegistry();
     payments.register(new FakePaymentProvider());
-    checkouts = new CheckoutService(driver, carts, orders, payments);
+    checkouts = new CheckoutService(driver, carts, orders, payments, decidedPort());
   });
   afterEach(async () => driver.close());
 
@@ -55,7 +64,7 @@ describe('storefront checkout service (SF-04)', () => {
     expect(checkout.orderId).toMatch(/^ord_/);
     expect(checkout.paymentId).toMatch(/^pay_/);
 
-    const order = await orders.getOrder(checkout.orderId);
+    const order = await orders.getOrder(checkout.orderId as string);
     expect(order.channel).toBe('storefront');
     expect(order.externalOrderId).toBe(`sf-${cartId}`);
     expect(order.status).toBe('paid');
@@ -81,14 +90,14 @@ describe('storefront checkout service (SF-04)', () => {
     const { cartId } = await cartWithItems([999]);
     const payments = new PaymentRegistry();
     payments.register(new FakePaymentProvider({ failConfirmAmountAboveMicros: 500_000_000 }));
-    const failing = new CheckoutService(driver, carts, orders, payments);
+    const failing = new CheckoutService(driver, carts, orders, payments, decidedPort());
 
     const checkout = await failing.checkout(cartId);
     expect(checkout.status).toBe('failed');
 
     const cart = await carts.getCart(cartId);
     expect(cart.status).toBe('open');
-    const order = await orders.getOrder(checkout.orderId);
+    const order = await orders.getOrder(checkout.orderId as string);
     expect(order.status).toBe('imported');
   });
 

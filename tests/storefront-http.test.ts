@@ -94,9 +94,20 @@ describe('storefront HTTP layer (SF-08)', () => {
       body: JSON.stringify({}),
     });
     expect(checkoutRes.status).toBe(201);
-    const { checkout } = (await checkoutRes.json()) as { checkout: { status: string; totalMicros: number } };
-    expect(checkout.status).toBe('paid');
-    expect(checkout.totalMicros).toBe(199_800_000);
+    const { checkout } = (await checkoutRes.json()) as { checkout: { status: string; decisionId?: string } };
+    // Storefront checkout is external money: zeus D3 grades it held (SF-09).
+    expect(checkout.status).toBe('pending');
+    expect(checkout.decisionId).toMatch(/^dec_/);
+
+    const approveRes = await app.request(`/api/v1/storefront/checkouts/${checkout.decisionId}/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ approver: 'owner' }),
+    });
+    expect(approveRes.status).toBe(200);
+    const { checkout: paid } = (await approveRes.json()) as { checkout: { status: string; totalMicros: number } };
+    expect(paid.status).toBe('paid');
+    expect(paid.totalMicros).toBe(199_800_000);
   });
 
   it('verifies webhook signatures and keeps public endpoints separate from ops Bearer', async () => {
