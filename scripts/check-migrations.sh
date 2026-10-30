@@ -20,8 +20,10 @@ if [ "$sql_files" != "$pg_files" ]; then
 fi
 
 for f in $sql_files; do
-  sql_tables=$(grep -oE 'CREATE TABLE IF NOT EXISTS [a-z_]+' "$SQL_DIR/$f" | awk '{print $NF}' | sort)
-  pg_tables=$(grep -oE 'CREATE TABLE IF NOT EXISTS [a-z_]+' "$PG_DIR/$f" | awk '{print $NF}' | sort)
+  # ALTER-only migrations (e.g. 005_checkout_snapshot) match no CREATE TABLE;
+  # grep exits 1 on no-match, which would abort under pipefail.
+  sql_tables=$(grep -oE 'CREATE TABLE IF NOT EXISTS [a-z_]+' "$SQL_DIR/$f" | awk '{print $NF}' | sort || true)
+  pg_tables=$(grep -oE 'CREATE TABLE IF NOT EXISTS [a-z_]+' "$PG_DIR/$f" | awk '{print $NF}' | sort || true)
   if [ "$sql_tables" != "$pg_tables" ]; then
     echo "FAIL: table set mismatch in $f"
     diff <(echo "$sql_tables") <(echo "$pg_tables") || true
