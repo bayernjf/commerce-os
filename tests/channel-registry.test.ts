@@ -33,8 +33,9 @@ describe('channel registry (T-M3-02)', () => {
 
   it('default registry only contains offline sandbox adapters (no live channels)', () => {
     const registry = createDefaultRegistry();
-    expect(registry.list()).toEqual(['sandbox-douyin']);
+    expect(registry.list()).toEqual(['sandbox-douyin', 'storefront']);
     expect(registry.get('sandbox-douyin').sandbox).toBe(true);
+    expect(registry.get('storefront').sandbox).toBe(true);
   });
 
   it('live channel account without credentialRef fails closed', async () => {

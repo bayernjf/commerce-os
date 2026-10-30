@@ -14,6 +14,12 @@ import { DashboardService } from './dashboard/dashboard-service.js';
 import { ContentReadModel } from './content/content-read-model.js';
 import { PublishingService } from './publishing/publishing-service.js';
 import type { DecisionPort } from './decision/types.js';
+import { StorefrontCatalogService } from './storefront/catalog-service.js';
+import { CartService } from './storefront/cart-service.js';
+import { CheckoutService } from './storefront/checkout-service.js';
+import { FakePaymentProvider } from './storefront/fake-payment-provider.js';
+import { PaymentRegistry } from './storefront/payment-registry.js';
+import { WebhookService } from './storefront/webhook-service.js';
 
 export interface CommerceServices {
   driver: StorageDriver;
@@ -28,6 +34,11 @@ export interface CommerceServices {
   customerService: CustomerService;
   dashboard: DashboardService;
   contentReadModel: ContentReadModel;
+  payments: PaymentRegistry;
+  storefrontCatalog: StorefrontCatalogService;
+  storefrontCarts: CartService;
+  storefrontCheckouts: CheckoutService;
+  storefrontWebhooks: WebhookService;
 }
 
 /**
@@ -52,6 +63,12 @@ export function createServices(
   const customerService = new CustomerService(driver, decisions, orders);
   const dashboard = new DashboardService(driver, eventLog);
   const contentReadModel = new ContentReadModel(eventLog);
+  const payments = new PaymentRegistry();
+  payments.register(new FakePaymentProvider());
+  const storefrontCatalog = new StorefrontCatalogService(driver);
+  const storefrontCarts = new CartService(driver);
+  const storefrontCheckouts = new CheckoutService(driver, storefrontCarts, orders, payments, decisions, eventLog);
+  const storefrontWebhooks = new WebhookService(driver, eventLog);
   return {
     driver,
     events: eventLog,
@@ -65,5 +82,10 @@ export function createServices(
     customerService,
     dashboard,
     contentReadModel,
+    payments,
+    storefrontCatalog,
+    storefrontCarts,
+    storefrontCheckouts,
+    storefrontWebhooks,
   };
 }

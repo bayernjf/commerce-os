@@ -152,11 +152,14 @@ export class AftersaleService {
   }
 
   private async executeChannelRefund(refund: Refund, order: Awaited<ReturnType<OrderService['getOrder']>>, decisionId: string): Promise<Refund> {
-    if (!order.channelAccountId) {
+    if (!order.channelAccountId && order.channel !== 'storefront') {
       throw new CommerceError('VALIDATION_FAILED', `order ${order.id} has no channel account`);
     }
-    const account = await this.accounts.get(order.channelAccountId);
-    const adapter = this.registry.get(account.channel);
+    // Storefront self-operated sales carry no channel account in the
+    // local/dev form: refunds settle through the registered 'storefront'
+    // fake payout adapter (real providers land with LF-07).
+    const account = order.channelAccountId ? await this.accounts.get(order.channelAccountId) : null;
+    const adapter = this.registry.get(account?.channel ?? order.channel);
     const result = await adapter.createRefund({
       externalOrderId: order.externalOrderId,
       lines: refund.lines.map((l) => {
@@ -205,6 +208,17 @@ export class AftersaleService {
   /** Read-only list, newest rows last (same order as the other domain lists). */
   async listRefunds(): Promise<Refund[]> {
     const rows = await this.driver.all<Record<string, unknown>>('SELECT id FROM refunds ORDER BY created_at ASC', []);
+    const refunds: Refund[] = [];
+    for (const r of rows) refunds.push(await this.getRefund(String(r.id)));
+    return refunds;
+  }
+
+  /** Refunds for one order, newest first (shopper-facing order status page). */
+  async listRefundsForOrder(orderId: string): Promise<Refund[]> {
+    const rows = await this.driver.all<Record<string, unknown>>(
+      'SELECT id FROM refunds WHERE order_id = ? ORDER BY created_at DESC',
+      [orderId],
+    );
     const refunds: Refund[] = [];
     for (const r of rows) refunds.push(await this.getRefund(String(r.id)));
     return refunds;

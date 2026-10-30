@@ -23,6 +23,11 @@ jobs:
         run: |
           ZEUS_DIR="$GITHUB_WORKSPACE/../zeus"
           git clone --depth 1 https://github.com/${{ github.repository_owner }}/zeus.git "$ZEUS_DIR"
+          # zeus main depends on @model-hub/model-kit via file:../model-hub;
+          # provide the sibling the same way zeus's own CI does, or its
+          # build fails with TS2307.
+          git clone --depth 1 https://github.com/${{ github.repository_owner }}/model-hub.git "$GITHUB_WORKSPACE/../model-hub"
+          npm ci --prefix "$GITHUB_WORKSPACE/../model-hub" --no-audit --no-fund
           cd "$ZEUS_DIR"
           npm ci
           npm run build

@@ -1,0 +1,22 @@
+{
+  "name": "commerce-os-storefront",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Storefront frontend (SF-10, Tier0-独立站双用 v1.0 D3=A): Astro SSR + React islands. SSR renders catalog pages against the commerce-os API; browser never sees API tokens.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/node": "^9.0.0",
+    "@astrojs/react": "^4.0.0",
+    "astro": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

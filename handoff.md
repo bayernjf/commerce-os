@@ -2,9 +2,15 @@
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
 
-## Current state（2026-10-26，运营只读缺口关闭；GATE-M6 外部阻塞未过门）
+## Current state（2026-10-28，storefront M1 SF-01~14 全部完成；GATE-M6 外部阻塞未过门）
 
-- **基线**：18 个测试文件 / **83 用例全绿**；`typecheck` 0 错；`lint` 0 错；迁移 sqlite + postgres 各 001/002 两份（002 客服三表，未新增迁移）。
+- **基线**：27 个测试文件 / **127 用例全绿**；`typecheck` 0 错；`lint` 0 错；`lint:secrets` 零命中；迁移 sqlite + postgres 各 001/002/003/004 四份（003 storefront 五表 + L0 owner 种子、004 webhook_deliveries，见 Active work）。
+- **storefront SF-09 完成**：checkout 接 zeus D3 决策门——`checkout()` 先 decide 后碰钱（impact=external → D3 挂起 pending+decisionId，订单/支付不创建、cart 保持 open）；`approveCheckout/rejectCheckout(decisionId, approver, comment)` 恢复执行；直通（decided）立即 finalize；finalize 回填 order_id/payment_id；HTTP 审批端点 `POST /api/v1/storefront/checkouts/:decisionId/approve|reject`（ops Bearer，与公开/cart 端点分离）。三态测试 `tests/storefront-checkout-decision.test.ts` + HTTP 全链路（pending→approve→paid 199_800_000 微元）。
+- **storefront SF-10 完成**：前端子工程 `front/`（Astro SSR + @astrojs/node，output=server；独立 package.json，不污染 API 构建）——三页 SSR：`/`（首页 hero+精选 6）、`/catalog`（全部商品）、`/catalog/[id]`（详情+SKU 表+价格）+ 404 兜底；`src/lib/api.ts` 服务端只读 client（`COMMERCE_API_BASE_URL`，超时 3s、失败返回空，浏览器零 token 暴露）。运行时验证：API 8788 + front 4321，真实种子商品三页渲染命中（¥1,299 / SKU-SSR-1 / 404 兜底）。
+- **storefront SF-11 完成**：API 加 CORS（hono/cors，`/api/v1/*`；默认放行 localhost:4321，`COMMERCE_ALLOWED_ORIGINS` 显式覆盖）；front 集成 @astrojs/react 19，详情页挂 `CartIsland`（client:load）——加购（POST /carts 建车+cartToken 存 localStorage、POST items）、迷你购物车（items 金额快照合计）、结算 POST checkout → **D3 挂起态展示**（decisionId + "等待审批"）→ 审批后 paid 成功态。运行时验证：CORS 预检 204 + ACAO 回显；建车→加购（¥1,999 快照）→结算 pending→HTTP approve→paid（orderId/paymentId/totalMicros 精确）；SSR 页 astro-island 挂载 + props 下发正确。注意 SSR 端 `localStorage` 需 typeof 守卫（已修）。
+- **storefront SF-12 完成**：购物者订单状态 + 退款入口（Cart token 全程防护）——`GET /api/v1/storefront/carts/:id/order`（按 external ref `sf-{cartId}` 查单，未结算 404）、`GET/POST /api/v1/storefront/carts/:id/refunds`（POST 校验 reason/orderItemId，D2 审批前 **423 挂起**）；新增 `OrderService.getOrderByExternalId`、`AftersaleService.listRefundsForOrder`；front 新增订单页 `/orders/[cartId]` + `OrderIsland`（订单状态/行明细/申请退款/D2 挂起态展示/退款记录），CartIsland paid 态加"查看订单详情"入口。运行时验证：建车→加购→结算→审批 paid→GET order 200（行含 id）→POST refunds **423**（decisionId 落库）→GET refunds 列表；无 token/错 token 一律 401。
+- **storefront SF-13 完成（GATE-S1）**：真实进程 e2e 固化为 `scripts/e2e-storefront.sh`（`npm run e2e:storefront[:console]`）——真实 zeus（3020，dist/http/serve.js）+ 真实 commerce（3021）+ ops-console（3022，登录门）三进程形态，10 步断言全通过：建车→加购→结算 pending（真实 zeus D3 决策）→审批 paid（1999000000 微元）→订单查询→退款 **423**（真实 zeus D2 挂起）→审批→**succeeded**（fake 打款，externalRefundRef 回填）→列表复核；脚本自起自清、可复跑。真实形态暴露并修复缺口：storefront 自营订单无 channel account → 新增 `StorefrontFakeAdapter`（'storefront' 渠道，createRefund 确定性 accepted，其余成员 fail-closed），`executeChannelRefund` 无 account 且 channel=storefront 时走该适配器（真实 Stripe 打款 M3/LF-07 落地）。密钥边界扫描 `scripts/scan-secrets.sh`（`npm run lint:secrets`）：git 跟踪文件 10 类真实凭据模式**零命中**。
+- **storefront SF-14 完成（ops-console 接线）**：运行时验证（真实 zeus 3020 + commerce 3021 + ops-console 3022 三进程）——造 storefront 数据（建车→加购×2→结算 pending→审批 paid `ord_sf-cart_…-fa8ee6` ¥2598→退款 423→审批 `succeeded`）后，owner 登录运营台：**订单页**显示 storefront 订单（渠道标记 storefront）、**退款页**显示 `rfd_sf-cart_…` + reason + succeeded、**库存页**显示 SKU-SF14、**内容页**（`/api/v1/content` 投影）与**看板**（订单/净额）正常渲染。接线层 `ops-console/src/server/upstream/commerce.ts` + `commerce-ops-service.ts` 直读 commerce 只读端点，storefront 数据零额外改动即入台；两仓 handoff 同步登记。
 - **M6 本地部分已完成**：
   - 可观测性 `src/observability/`：结构化 JSON logger（错误走 stderr）、AlertReporter（stderr 结构化告警 + 可选 webhook、cooldown 去重）、readiness 探针（DB round-trip + 数据卷磁盘空间）。
   - HTTP：`/healthz` 保持 liveness，新增 `/readyz`（真探 DB+磁盘，失败 503 并告警）；503 依赖错误（decision/content/channel）与 500 未处理错误在错误边界发告警。
@@ -43,7 +49,19 @@
 
 ## Active work（倒序）
 
-0. **运营只读缺口关闭（2026-10-26，ops-console T-M8 登记的 commerce 内核缺口）**：
+0. **storefront 工作包（2026-10-28，独立站双用方案 v1.0 D2=B 拍板）**：
+   - `feature/storefront` 分支（基于 dev）。
+   - **SF-01 迁移 003**：五表 `merchants`（L0 owner 单行种子 `mer_owner`，D1=A 租户预留）/ `carts` / `cart_items` / `checkouts` / `payments`（金额微元整数），sqlite + postgres 双方言配对，`check:migrations` OK（3/3）。提交 `b58f60d` feat + `7092408` test。
+   - **SF-02 catalog 投影**：`src/storefront/catalog-service.ts` 只读投影，仅 `listed` 商品 + `active` SKU（draft/delisted 不可见，改价经商品投影不追溯）。提交 `cc0576a` feat + `a6cc809` test。
+   - **SF-03 cart 服务**：`src/storefront/cart-service.ts` 匿名会话 createCart/getCart/listItems/addItem；行级校验（listed 商品/active sku/qty 正整数）、`unit_amount_micros` 首次加入快照、同 sku 合并 qty 不改快照、会话隔离。提交 `8528e6f` feat + `de117d7` test。
+   - **SF-05 payment port + fake provider**：`payment-port.ts`（create/confirm/refund/getStatus/verifyWebhook，端口不持本地持久化，对齐 ChannelAdapter）+ `fake-payment-provider.ts`（确定性脚本回放，无网络，sandbox=true）。提交 `b6a9ac8` feat + `09aab7d` test。
+   - **SF-06 provider registry**：`payment-registry.ts` fail-closed（未注册 → CREDENTIAL_MISSING 422，绝不静默回退 fake）；PaymentPort 增 sandbox 标记。提交 `c83397f` feat + `7857ed0` test。
+   - **SF-04 checkout**：`checkout-service.ts` cart 校验 → 幂等生单（channel=storefront，external_order_id=`sf-{cartId}`，重复结算返回已有 checkout 不重复生单）→ PaymentPort.create/confirm → paid/failed 状态机；paid 关 cart 置 checked_out；D3 挂起留 SF-09。提交 `d739a6b` feat + `2843268` test。
+   - **SF-07 webhook**：迁移 004 `webhook_deliveries`（(provider, delivery_id) 唯一）；`webhook-service.ts` HMAC-SHA256 验签（坏签名 401 + rejected 留痕）、delivery 幂等（重复投递不重复处理）、`payment.webhook_delivered` 审计事件；新增错误码 `WEBHOOK_SIGNATURE_INVALID`→401。提交 `931b6fe` feat + `691ec8a` test。
+   - **SF-08 HTTP 层**：`/api/v1/storefront/*`（公开 catalog 读 + `Cart <token>` 无状态 HMAC 会话 + checkout + webhook 回调）；鉴权分离——storefront 路由注册在 ops Bearer 中间件之前，后台保持 Bearer-only；serve.ts 接 `COMMERCE_STOREFRONT_CART_SECRET` / `COMMERCE_WEBHOOK_FAKE_SECRET`。提交 `a5ace63` feat + `b29506c` test。
+   - 门结果：五门全绿（**25 文件 / 115 用例**；迁移配对 4/4）。
+   - 待续：SF-09 D3 决策挂起 → SF-14（详细任务见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md` M1）。
+1. **运营只读缺口关闭（2026-10-26，ops-console T-M8 登记的 commerce 内核缺口）**：
    - `GET /api/v1/refunds` 列表（`AftersaleService.listRefunds()`，ids 逐行 map，与 listOrders 同形）——此前只有 `GET /api/v1/refunds/:id` 详情。
    - `GET /api/v1/content` 列表 + `GET /api/v1/content/:id` 详情（`src/content/content-read-model.ts`，只读投影 `product.listed` 事件，详情按 payload.externalContentId 读取，未命中 404 NOT_FOUND）——此前控制台只能从事件流 + dashboard `content.published` 口径派生。
    - 两个家族均为纯只读，Bearer 中间件已覆盖 `/api/v1/*`；每端点带 HTTP 级测试（空列表/种子读回/未知 id 404/无 token 401/正确 token 200）。
@@ -55,8 +73,9 @@
 2. **M4 内容底座（2026-10-23）**：`content/loom-content-client.ts` HTTP 替换桩（dbeb0f0）；客服 `customer-service/` + 迁移 002（意图分级、D2+ 转人工）；content-loop 闭环测试（686e7e5）；GATE-M4 过。
 3. **M3 全量交付（2026-10-22）**：新建 `/Users/jiangfeng/000mycodes/commerce-os`（与六仓同级），48 测试绿、typecheck/lint/build/迁移配对全过、真实启动冒烟通过、GATE-M3 e2e 通过。~~未 commit（等用户授权）~~ **已提交（2026-10-22）**：`git init -b dev` 后 11 个英文原子提交（472ff53 脚手架 → 26b6f89 storage → f831eb7 channel → c003f64 product/order → 7aa2c9c decision → 0f2aa08 content/publishing → b847bed aftersale → 00bab44 fulfillment → 2dcf865 api → 131093e tests → 0540478 docs），作者 bayernjf 本人、无 AI co-author、**无 remote、未 push**；提交后五门（check:migrations/typecheck/lint/test/build）复跑全过。
 
-## Next（M6 外部条件 + M7）
+## Next（M6 外部条件 + M7 + storefront）
 
+- [ ] **storefront SF-09~SF-14（2026-10-28 起）**：SF-01~08 已落地（迁移 003/004 + catalog/cart/checkout/webhook 服务 + payment port/registry + HTTP 层）；下一任务 SF-09 结算金额进 ZeusDecisionClient（D3 阈值挂起三态）。详见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md` M1。
 - [ ] M6 现网（T-M6-03，外部）：准备 Vercel/Cloudflare/云凭据 + 域名/TLS，按生产工件或 agent-dev 发布编排真做现网部署，跑 healthz/readyz
 - [ ] T-M6-04（外部）：抖店资质/店铺到位后，新增 live `douyin` 适配器（实现 ChannelAdapter 五方法 + 凭据后端），完成 1 次真实 upsert+拉单
 - [ ] T-M6-05 现网冒烟（外部）：含 D2/D3 真实审批一次，补 GATE-M6 证据后过门

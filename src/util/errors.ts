@@ -13,6 +13,7 @@ export type CommerceErrorCode =
   | 'DECISION_UNAVAILABLE'
   | 'CONTENT_UNAVAILABLE'
   | 'NOT_IMPLEMENTED_PLACEHOLDER'
+  | 'WEBHOOK_SIGNATURE_INVALID'
   | 'CONFLICT';
 
 export class CommerceError extends Error {
@@ -38,6 +39,8 @@ export function httpStatusFor(code: CommerceErrorCode): number {
     case 'CHANNEL_UNREGISTERED':
     case 'CREDENTIAL_MISSING':
       return 422;
+    case 'WEBHOOK_SIGNATURE_INVALID':
+      return 401;
     case 'IDEMPOTENCY_CONFLICT':
     case 'CONFLICT':
       return 409;
