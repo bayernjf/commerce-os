@@ -10,6 +10,7 @@ import { LoomContentClient } from './content/loom-content-client.js';
 import type { ContentClient } from './content/types.js';
 import { createAlertReporter } from './observability/alerts.js';
 import { logger } from './observability/logger.js';
+import { assertFailClosedBoot } from './util/boot.js';
 
 async function main(): Promise<void> {
   const reporter = createAlertReporter();
@@ -24,6 +25,12 @@ async function main(): Promise<void> {
     reporter.report('process_fatal', 'critical', `uncaught exception: ${err.message}`);
     process.exit(1);
   });
+
+  // Auth is fail-closed (Tier0 review 2026-10-30 H1): ops routes under
+  // /api/v1 are guarded by a Bearer token, so without a configured token
+  // the server must refuse to boot instead of starting wide open.
+  const apiToken = process.env.COMMERCE_API_TOKEN;
+  assertFailClosedBoot(apiToken);
 
   const driverKind = process.env.COMMERCE_DB_DRIVER ?? 'sqlite';
   let dataDir: string | undefined;
@@ -61,14 +68,17 @@ async function main(): Promise<void> {
     : undefined;
   const services = createServices(driver, decisions, undefined, content);
 
+  const webhookSecrets: Record<string, string> = {};
+  if (process.env.COMMERCE_WEBHOOK_FAKE_SECRET) {
+    webhookSecrets.fake = process.env.COMMERCE_WEBHOOK_FAKE_SECRET;
+  }
+
   const app = createApp({
-    ...(process.env.COMMERCE_API_TOKEN ? { token: process.env.COMMERCE_API_TOKEN } : {}),
+    token: apiToken,
     ...(process.env.COMMERCE_STOREFRONT_CART_SECRET
       ? { storefrontCartSecret: process.env.COMMERCE_STOREFRONT_CART_SECRET }
       : {}),
-    ...(process.env.COMMERCE_WEBHOOK_FAKE_SECRET
-      ? { webhookSecrets: { fake: process.env.COMMERCE_WEBHOOK_FAKE_SECRET } }
-      : {}),
+    ...(Object.keys(webhookSecrets).length > 0 ? { webhookSecrets } : {}),
     ...(process.env.COMMERCE_ALLOWED_ORIGINS
       ? { allowedOrigins: process.env.COMMERCE_ALLOWED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) }
       : {}),
@@ -82,6 +92,15 @@ async function main(): Promise<void> {
   // node:http via @hono/node-server (Node runtime).
   const { serve } = await import('@hono/node-server');
   const server = serve({ fetch: app.fetch, port, hostname: host }, (info) => {
+    // One-line statement of the current authorization posture so operators
+    // can tell from boot logs which guards are active (Tier0 review H1).
+    logger.info('auth posture', {
+      mode: 'fail-closed',
+      opsBearer: 'required on /api/v1/*',
+      cartTokens: process.env.COMMERCE_STOREFRONT_CART_SECRET ? 'enabled' : 'disabled',
+      webhookProviders: Object.keys(webhookSecrets).sort(),
+      allowedOrigins: process.env.COMMERCE_ALLOWED_ORIGINS ?? 'localhost-dev-default',
+    });
     logger.info('commerce-os listening', { host, port: info.port, driver: driver.dialect });
   });
 

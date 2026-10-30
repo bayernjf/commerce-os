@@ -49,8 +49,13 @@ npm test                   # 48 用例（含经假 zeus HTTP 服务器的真实 
 npm run build
 
 npm run migrate:up         # 本地 sqlite 迁移（默认 ./data/commerce-os.db）
-npm start                  # http://127.0.0.1:8787 （node --experimental-sqlite）
+COMMERCE_API_TOKEN=dev-token npm start   # http://127.0.0.1:8787 （node --experimental-sqlite）
 ```
+
+`COMMERCE_API_TOKEN` 必须配置：授权为 fail-closed，未配置时服务拒绝启动
+（启动日志会打印一行当前授权姿态）。`/api/v1` 运营路由需要
+`Authorization: Bearer <token>`；前台公开路由（catalog/cart/webhook）由
+各自的 cart token 与 webhook HMAC 保护。
 
 环境变量见 `.env.example`。生产 PostgreSQL：`npm install pg` 后 `COMMERCE_DB_DRIVER=postgres DATABASE_URL=... npm run migrate:pg:up`。
 
