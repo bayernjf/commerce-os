@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { StorageDriver } from '../storage/driver.js';
 import { CommerceError } from '../util/errors.js';
 import { newId, nowIso } from '../util/ids.js';
@@ -13,7 +14,11 @@ import type { EventLog } from '../storage/event-log.js';
  * locally) → held checkouts park as 'pending' with a decisionId until
  * approved/rejected; decided checkouts finalize immediately (idempotent
  * storefront order + PaymentPort.create/confirm → paid/failed).
- * Re-checking out the same cart returns the existing checkout.
+ * Re-checking out the same cart returns the existing checkout while it is
+ * pending or paid; a rejected/failed checkout unblocks the open cart so the
+ * shopper can re-initiate with a fresh decision (H5: approval is bound to
+ * the cart line snapshot taken at checkout time — if the cart drifted, the
+ * approval is refused and a new checkout is required).
  */
 
 export type CheckoutStatus = 'pending' | 'paid' | 'failed' | 'rejected';
@@ -32,6 +37,15 @@ export interface Checkout {
   decidedAt?: string;
 }
 
+export interface CheckoutLine {
+  skuId: string;
+  skuCode: string;
+  title: string;
+  qty: number;
+  unitAmountMicros: number;
+  currency: string;
+}
+
 function validationError(message: string, details?: Record<string, unknown>): CommerceError {
   return new CommerceError('VALIDATION_FAILED', message, false, details);
 }
@@ -40,6 +54,17 @@ function notFoundError(message: string, details?: Record<string, unknown>): Comm
 }
 function conflictError(message: string, details?: Record<string, unknown>): CommerceError {
   return new CommerceError('CONFLICT', message, false, details);
+}
+
+/**
+ * Canonical digest of the cart lines a decision was requested for (H5).
+ * The cart stays open until payment, so approval re-derives this digest from
+ * the current rows and refuses when anything drifted (qty, lines, prices on
+ * newly added lines, currency). Line order is stable (ORDER BY ci.id ASC).
+ */
+function linesDigest(lines: CheckoutLine[]): string {
+  const canonical = lines.map((l) => `${l.skuId}|${l.qty}|${l.unitAmountMicros}|${l.currency}`).join('\n');
+  return createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
 export class CheckoutService {
@@ -76,7 +101,10 @@ export class CheckoutService {
       reversibility: 'reversible',
       riskTags: ['storefront', providerName],
       proposal: `checkout cart ${cartId} (${currency} ${(totalMicros / 1_000_000).toFixed(2)})`,
-      idempotencyKey: `checkout:${cartId}`,
+      // One decision per checkout attempt: a re-initiated checkout (after a
+      // rejection or a drifted-cart refusal) must not collide with the old
+      // decision through the cart-scoped key.
+      idempotencyKey: `checkout:${checkoutId}`,
     });
     await this.recordEvent('decision.requested', checkoutId, {
       decisionId: decision.decisionId,
@@ -86,9 +114,9 @@ export class CheckoutService {
     });
 
     await this.driver.run(
-      `INSERT INTO checkouts (id, merchant_id, cart_id, status, decision_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [checkoutId, cart.merchantId, cartId, 'pending', decision.decisionId, nowIso()],
+      `INSERT INTO checkouts (id, merchant_id, cart_id, status, decision_id, total_micros, currency, lines_digest, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [checkoutId, cart.merchantId, cartId, 'pending', decision.decisionId, totalMicros, currency, linesDigest(lines), nowIso()],
     );
 
     if (decision.status === 'awaiting_approval' || decision.status === 'blocked') {
@@ -99,16 +127,54 @@ export class CheckoutService {
 
   async approveCheckout(decisionId: string, approver: string, comment?: string): Promise<Checkout> {
     const row = await this.findByDecision(decisionId);
+    const cart = await this.carts.getCart(String(row.cart_id));
+    const lines = await this.loadLines(cart.id);
+    const currentTotal = lines.reduce((sum, l) => sum + l.unitAmountMicros * l.qty, 0);
+    const currentDigest = linesDigest(lines);
+    const currentCurrency = String(lines[0]?.currency ?? 'CNY');
+
+    // H5: the decision was requested for the cart as it looked at checkout
+    // time. The cart stays open until payment, so verify the current rows
+    // still match the stored snapshot BEFORE consuming the decision —
+    // otherwise the approved amount and the charged amount could diverge.
+    const hasSnapshot = row.total_micros !== null && row.total_micros !== undefined;
+    const snapshotTotal = hasSnapshot ? Number(row.total_micros) : null;
+    const snapshotCurrency = row.currency === null || row.currency === undefined ? null : String(row.currency);
+    const snapshotDigest = row.lines_digest === null || row.lines_digest === undefined ? null : String(row.lines_digest);
+    if (
+      snapshotTotal === null ||
+      snapshotDigest === null ||
+      snapshotTotal !== currentTotal ||
+      snapshotDigest !== currentDigest ||
+      (snapshotCurrency !== null && snapshotCurrency !== currentCurrency)
+    ) {
+      // Un-block the cart: the stale checkout is closed and the shopper must
+      // re-initiate checkout, which requests a fresh decision for the new
+      // cart contents.
+      await this.markRejected(String(row.id));
+      await this.recordEvent('checkout.approve_blocked', String(row.id), {
+        decisionId,
+        reason: 'cart-lines-changed-since-checkout',
+        approvedTotalMicros: snapshotTotal,
+        currentTotalMicros: currentTotal,
+      });
+      throw conflictError(
+        `cart lines changed since checkout ${String(row.id)} was initiated; approval refused, re-initiate checkout`,
+        {
+          checkoutId: String(row.id),
+          decisionId,
+          ...(snapshotTotal !== null ? { approvedTotalMicros: snapshotTotal } : {}),
+          currentTotalMicros: currentTotal,
+        },
+      );
+    }
+
     const decision = await this.decisions.approve(decisionId, approver, comment);
     if (decision.status === 'rejected') {
       await this.markRejected(String(row.id));
       throw conflictError(`checkout decision was rejected: ${decisionId}`, { decisionId });
     }
-    const cart = await this.carts.getCart(String(row.cart_id));
-    const lines = await this.loadLines(cart.id);
-    const totalMicros = lines.reduce((sum, l) => sum + l.unitAmountMicros * l.qty, 0);
-    const currency = String(lines[0]?.currency ?? 'CNY');
-    return this.finalize(String(row.id), cart.id, lines, totalMicros, currency, 'fake');
+    return this.finalize(String(row.id), cart.id, lines, snapshotTotal, snapshotCurrency ?? currentCurrency, 'fake');
   }
 
   async rejectCheckout(decisionId: string, approver: string, comment?: string): Promise<{ checkoutId: string; status: 'rejected' }> {
@@ -184,9 +250,18 @@ export class CheckoutService {
     await this.events?.record({ eventType, refType: 'checkout', refId, payload });
   }
 
+  /**
+   * Re-checkout is idempotent only while the last checkout is pending or
+   * paid. A rejected/failed checkout must not short-circuit: the open cart
+   * falls through so checkout() creates a fresh checkout with a new decision
+   * (H5 re-initiate path; the checkout-scoped idempotencyKey keeps zeus from
+   * colliding with the abandoned decision).
+   */
   private async findExisting(cartId: string): Promise<Checkout | null> {
     const row = await this.findRow('cart_id', cartId);
-    return row ? this.mapCheckout(row) : null;
+    if (!row) return null;
+    const status = row.status as CheckoutStatus;
+    return status === 'pending' || status === 'paid' ? this.mapCheckout(row) : null;
   }
 
   private async findRow(column: 'id' | 'cart_id', value: string): Promise<Record<string, unknown> | null> {
