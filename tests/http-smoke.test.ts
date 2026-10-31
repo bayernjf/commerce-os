@@ -120,4 +120,44 @@ describe('HTTP API v1 smoke', () => {
     const withToken = await secured.request('/api/v1/products', { headers: { Authorization: 'Bearer secret' } });
     expect(withToken.status).toBe(200);
   });
+
+  it('unknown exceptions return a generic ProblemDetails body without echoing the error text', async () => {
+    // Tier0 review 2026-10-30 H2: the global 500 handler used to echo
+    // err.message, leaking driver/table details. A non-CommerceError escaping
+    // a route must produce a generic RFC 9457 body, with the original text
+    // kept on the server side (alert reporter) only.
+    const reported: string[] = [];
+    const reporter = {
+      report: (kind: string, severity: string, message: string): void => {
+        void kind;
+        void severity;
+        reported.push(message);
+      },
+    };
+    const broken = createApp({ services: h.services, reporter: reporter as unknown as import('../src/observability/alerts.js').AlertReporter });
+    const products = h.services.products as unknown as Record<string, unknown>;
+    const originalList = products.listCategories;
+    products.listCategories = async () => {
+      throw new Error('ECONNREFUSED 10.0.0.5:5432 — relation categories missing');
+    };
+    try {
+      const res = await broken.request('/api/v1/categories');
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).toEqual({
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'internal error',
+        instance: '/api/v1/categories',
+      });
+      const raw = JSON.stringify(body);
+      expect(raw).not.toContain('ECONNREFUSED');
+      expect(raw).not.toContain('categories missing');
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toContain('ECONNREFUSED');
+    } finally {
+      products.listCategories = originalList;
+    }
+  });
 });

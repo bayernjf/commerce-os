@@ -152,8 +152,22 @@ export function registerHttpRoutes(
       }
       return c.json({ error: errorBody(err) }, status as 400 | 401 | 404 | 409 | 422 | 423 | 501 | 503);
     }
+    // Unknown exceptions must not echo their text to the client (Tier0 review
+    // 2026-10-30 H2): driver/table details leak through err.message. The
+    // original error goes to the server-side alert log only; the response is
+    // a generic ProblemDetails (RFC 9457) body. CommerceError bodies above
+    // are intentional API errors and keep their existing shape.
     deps.reporter?.report('process_fatal', 'critical', `unhandled error: ${(err as Error).message}`);
-    return c.json({ error: { code: 'INTERNAL_ERROR', message: (err as Error).message, retryable: false } }, 500);
+    return c.json(
+      {
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'internal error',
+        instance: c.req.path,
+      },
+      500,
+    );
   });
 
   // ---- Channel accounts ------------------------------------------------
