@@ -13,6 +13,7 @@ import { CustomerService } from './customer-service/customer-service.js';
 import { DashboardService } from './dashboard/dashboard-service.js';
 import { ContentReadModel } from './content/content-read-model.js';
 import { PublishingService } from './publishing/publishing-service.js';
+import { OfflineListingIngest, type ListingIngestPort } from './publishing/listing-ingest.js';
 import type { DecisionPort } from './decision/types.js';
 import { StorefrontCatalogService } from './storefront/catalog-service.js';
 import { CartService } from './storefront/cart-service.js';
@@ -50,6 +51,7 @@ export function createServices(
   decisions: DecisionPort,
   registry?: ChannelRegistry,
   content?: ContentClient,
+  ingest?: ListingIngestPort,
 ): CommerceServices {
   const eventLog = new EventLog(driver);
   const resolvedRegistry = registry ?? createDefaultRegistry();
@@ -59,7 +61,15 @@ export function createServices(
   const fulfillment = new FulfillmentService(driver, resolvedRegistry, accounts);
   const aftersales = new AftersaleService(driver, eventLog, decisions, resolvedRegistry, accounts, orders);
   const contentClient = content ?? new StubContentClient();
-  const publishing = new PublishingService(eventLog, decisions, resolvedRegistry, accounts, products, contentClient);
+  const publishing = new PublishingService(
+    eventLog,
+    decisions,
+    resolvedRegistry,
+    accounts,
+    products,
+    contentClient,
+    ingest ?? new OfflineListingIngest(),
+  );
   const customerService = new CustomerService(driver, decisions, orders);
   const dashboard = new DashboardService(driver, eventLog);
   const contentReadModel = new ContentReadModel(eventLog);

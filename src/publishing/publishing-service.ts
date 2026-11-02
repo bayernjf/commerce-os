@@ -5,6 +5,7 @@ import type { ChannelRegistry } from '../channel/registry.js';
 import type { ChannelAccountService } from '../channel/channel-account-service.js';
 import type { ProductService } from '../product/product-service.js';
 import type { ContentCandidate, ContentClient } from '../content/types.js';
+import type { ListingIngestPort } from './listing-ingest.js';
 
 export interface ListingSubmission {
   productId: string;
@@ -36,6 +37,8 @@ export class PublishingService {
     private readonly accounts: ChannelAccountService,
     private readonly products: ProductService,
     private readonly content: ContentClient,
+    /** Listing ingest (T-M9-01/J1). Absent = no image/URL listing extraction. */
+    private readonly ingest?: ListingIngestPort,
   ) {}
 
   async submitListing(input: {
@@ -44,17 +47,35 @@ export class PublishingService {
     contentType?: ContentCandidate['contentType'];
     sellingPoints?: string[];
     constraints?: { banned?: string[]; brand?: string[] };
+    /** T-M9-01/J1: extract listing info from images/URL before content gen. */
+    ingestSource?: { imageUrls?: string[]; url?: string };
   }): Promise<ListingSubmission> {
     const product = await this.products.getProduct(input.productId);
     const account = await this.accounts.get(input.channelAccountId);
     const adapter = this.registry.get(account.channel);
 
-    // 1. Content candidate (stub in M3, loom content-base in M4).
+    // 1. T-M9-01/J1: optionally enrich the listing from images/URL first.
+    let title = product.title;
+    let sellingPoints = input.sellingPoints ?? [];
+    let description: string | undefined;
+    if (input.ingestSource !== undefined && this.ingest !== undefined) {
+      const ingested = await this.ingest.ingest({
+        productId: product.id,
+        channel: account.channel,
+        ...(input.ingestSource.imageUrls?.length ? { imageUrls: input.ingestSource.imageUrls } : {}),
+        ...(input.ingestSource.url ? { url: input.ingestSource.url } : {}),
+      });
+      if (ingested.title.trim().length > 0) title = ingested.title;
+      if (ingested.sellingPoints.length > 0) sellingPoints = ingested.sellingPoints;
+      if (ingested.description.trim().length > 0) description = ingested.description;
+    }
+
+    // 2. Content candidate (stub in M3, loom content-base in M4).
     const candidate = await this.content.request({
       productId: product.id,
       channel: account.channel,
       contentType: input.contentType ?? 'detail',
-      inputs: { title: product.title, sellingPoints: input.sellingPoints ?? [] },
+      inputs: { title, sellingPoints, ...(description !== undefined ? { description } : {}) },
       ...(input.constraints ? { constraints: input.constraints } : {}),
     });
 
