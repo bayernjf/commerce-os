@@ -22,6 +22,7 @@ export interface Refund {
   status: 'requested' | 'awaiting_approval' | 'approved' | 'succeeded' | 'rejected' | 'failed';
   decisionId?: string;
   externalRefundRef?: string;
+  idempotencyKey?: string;
   createdAt: string;
   decidedAt?: string;
 }
@@ -41,7 +42,7 @@ export class AftersaleService {
     private readonly orders: OrderService,
   ) {}
 
-  async requestRefund(orderId: string, input: { lines: RefundLineInput[]; reason: string }): Promise<Refund> {
+  async requestRefund(orderId: string, input: { lines: RefundLineInput[]; reason: string; idempotencyKey?: string }): Promise<Refund> {
     if (!input.reason?.trim()) throw new CommerceError('VALIDATION_FAILED', 'refund.reason is required');
     const order = await this.orders.getOrder(orderId);
     if (!Array.isArray(input.lines) || input.lines.length === 0) {
@@ -74,13 +75,28 @@ export class AftersaleService {
       lines,
       reason: input.reason.trim(),
       status: 'requested',
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       createdAt: now,
     };
-    await this.driver.run(
-      `INSERT INTO refunds (id, order_id, lines_json, reason, status, decision_id, external_refund_ref, created_at, decided_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [refund.id, refund.orderId, JSON.stringify(lines), refund.reason, refund.status, null, null, refund.createdAt, null],
-    );
+    // Cumulative guard (P1): reserve qty/amount per order line via a conditional
+    // upsert. The database is the only admission gate — two concurrent requests
+    // cannot both pass, and the small auto-refund path is covered identically.
+    await this.reserveLines(refund, order);
+    try {
+      await this.driver.run(
+        `INSERT INTO refunds (id, order_id, lines_json, reason, status, decision_id, external_refund_ref, created_at, decided_at, idempotency_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [refund.id, refund.orderId, JSON.stringify(lines), refund.reason, refund.status, null, null, refund.createdAt, null, input.idempotencyKey ?? null],
+      );
+    } catch (error) {
+      // The reservation is only valid alongside its refund row; release on any
+      // insert failure, then replay idempotently if the key simply collided.
+      await this.releaseLines(lines);
+      if (input.idempotencyKey && this.isUniqueViolation(error)) {
+        return this.getRefundByIdempotencyKey(input.idempotencyKey);
+      }
+      throw error;
+    }
 
     const decision = await this.decisions.decide({
       intent: 'order.refund',
@@ -136,6 +152,8 @@ export class AftersaleService {
 
     if (verdict === 'reject' || decision.status === 'rejected') {
       await this.driver.run('UPDATE refunds SET status = ?, decided_at = ? WHERE id = ?', ['rejected', nowIso(), refund.id]);
+      // Rejection never moves money, so the reserved quantity is handed back.
+      await this.releaseLines(refund.lines);
       await this.events.record({
         eventType: 'refund.rejected',
         refType: 'refund',
@@ -146,7 +164,15 @@ export class AftersaleService {
       return this.getRefund(refundId);
     }
 
-    await this.driver.run('UPDATE refunds SET status = ?, decided_at = ? WHERE id = ?', ['approved', nowIso(), refund.id]);
+    // Concurrent approvals must not both reach the channel: claim the refund by
+    // flipping the state exactly once. The loser sees 0 changes and stops here.
+    const claim = await this.driver.run(
+      `UPDATE refunds SET status = ?, decided_at = ? WHERE id = ? AND status = 'awaiting_approval'`,
+      ['approved', nowIso(), refund.id],
+    );
+    if (claim.changes === 0) {
+      throw new CommerceError('CONFLICT', `refund was already decided by a concurrent request: ${refund.id}`, false, { refundId: refund.id });
+    }
     const order = await this.orders.getOrder(refund.orderId);
     return this.executeChannelRefund(refund, order, refund.decisionId);
   }
@@ -177,6 +203,8 @@ export class AftersaleService {
       await this.driver.run('UPDATE refunds SET status = ?, external_refund_ref = ?, decided_at = ? WHERE id = ?', [
         'failed', result.externalRefundId, nowIso(), refund.id,
       ]);
+      // The channel explicitly refused to pay: nothing moved, reservation released.
+      await this.releaseLines(refund.lines);
       await this.events.record({
         eventType: 'refund.failed',
         refType: 'refund',
@@ -224,6 +252,82 @@ export class AftersaleService {
     return refunds;
   }
 
+  /**
+   * Cumulative admission gate: one conditional upsert per line. On the first
+   * refund for a line it inserts the usage row; afterwards it only increments
+   * while `refunded_qty/amount + this refund` stays within the purchased
+   * qty/amount. SQLite serializes writers and Postgres takes a row lock on
+   * conflict, so concurrent requests cannot both pass. Any prior reservation
+   * made for this same refund is rolled back before the error propagates.
+   */
+  private async reserveLines(refund: Refund, order: Awaited<ReturnType<OrderService['getOrder']>>): Promise<void> {
+    const reserved: Refund['lines'] = [];
+    try {
+      for (const line of refund.lines) {
+        const orderItem = order.lines.find((l) => l.id === line.orderItemId);
+        if (!orderItem) throw new CommerceError('NOT_FOUND', `order item not found on this order: ${line.orderItemId}`);
+        const maxAmountCents = Math.round(orderItem.price * orderItem.qty * 100);
+        const amountCents = Math.round(line.amount * 100);
+        const result = await this.driver.run(
+          `INSERT INTO refund_line_usage (order_item_id, refunded_qty, refunded_amount_cents, updated_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(order_item_id) DO UPDATE SET
+             refunded_qty = refunded_qty + excluded.refunded_qty,
+             refunded_amount_cents = refunded_amount_cents + excluded.refunded_amount_cents,
+             updated_at = excluded.updated_at
+           WHERE refund_line_usage.refunded_qty + excluded.refunded_qty <= ?
+             AND refund_line_usage.refunded_amount_cents + excluded.refunded_amount_cents <= ?`,
+          [line.orderItemId, line.qty, amountCents, nowIso(), orderItem.qty, maxAmountCents],
+        );
+        if (result.changes === 0) {
+          throw new CommerceError('CONFLICT', `refund exceeds refundable quantity for order item ${line.orderItemId}`, false, {
+            orderItemId: line.orderItemId,
+            requestedQty: line.qty,
+            maxQty: orderItem.qty,
+          });
+        }
+        reserved.push(line);
+      }
+    } catch (error) {
+      await this.releaseLines(reserved);
+      if (error instanceof CommerceError && error.code === 'CONFLICT') {
+        await this.events.record({
+          eventType: 'refund.limit_exceeded',
+          refType: 'refund',
+          refId: refund.id,
+          payload: { orderId: refund.orderId, lines: refund.lines },
+        });
+      }
+      throw error;
+    }
+  }
+
+  /** Hand reserved quantity/amount back (rejection, channel-refusal, or compensation). */
+  private async releaseLines(lines: Refund['lines']): Promise<void> {
+    for (const line of lines) {
+      await this.driver.run(
+        `UPDATE refund_line_usage
+         SET refunded_qty = MAX(refunded_qty - ?, 0),
+             refunded_amount_cents = MAX(refunded_amount_cents - ?, 0),
+             updated_at = ?
+         WHERE order_item_id = ?`,
+        [line.qty, Math.round(line.amount * 100), nowIso(), line.orderItemId],
+      );
+    }
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : '';
+    const code = typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+    return message.includes('UNIQUE constraint failed') || code === '23505';
+  }
+
+  private async getRefundByIdempotencyKey(key: string): Promise<Refund> {
+    const row = await this.driver.get<Record<string, unknown>>('SELECT * FROM refunds WHERE idempotency_key = ?', [key]);
+    if (!row) throw new CommerceError('NOT_FOUND', `refund not found for idempotency key`, false, {});
+    return this.mapRefund(row);
+  }
+
   private mapRefund(row: Record<string, unknown>): Refund {
     let lines: Refund['lines'] = [];
     try {
@@ -239,6 +343,7 @@ export class AftersaleService {
       status: row.status as Refund['status'],
       ...(row.decision_id ? { decisionId: String(row.decision_id) } : {}),
       ...(row.external_refund_ref ? { externalRefundRef: String(row.external_refund_ref) } : {}),
+      ...(row.idempotency_key ? { idempotencyKey: String(row.idempotency_key) } : {}),
       createdAt: String(row.created_at),
       ...(row.decided_at ? { decidedAt: String(row.decided_at) } : {}),
     };

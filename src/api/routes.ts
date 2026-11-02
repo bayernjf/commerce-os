@@ -223,8 +223,9 @@ export function registerHttpRoutes(
       orderId: string;
       lines: { orderItemId?: string; qty?: number; amount?: number }[];
       reason: string;
+      idempotencyKey?: string;
     };
-    const refund = await services.aftersales.requestRefund(body.orderId, { lines: body.lines ?? [], reason: body.reason });
+    const refund = await services.aftersales.requestRefund(body.orderId, { lines: body.lines ?? [], reason: body.reason, ...(body.idempotencyKey ? { idempotencyKey: body.idempotencyKey } : {}) });
     const status = (refund.status === 'awaiting_approval' ? 423 : 201) as 423 | 201;
     return c.json({ refund }, status);
   });
