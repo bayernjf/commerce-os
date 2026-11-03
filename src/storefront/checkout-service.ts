@@ -114,9 +114,9 @@ export class CheckoutService {
     });
 
     await this.driver.run(
-      `INSERT INTO checkouts (id, merchant_id, cart_id, status, decision_id, total_micros, currency, lines_digest, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [checkoutId, cart.merchantId, cartId, 'pending', decision.decisionId, totalMicros, currency, linesDigest(lines), nowIso()],
+      `INSERT INTO checkouts (id, merchant_id, cart_id, status, decision_id, total_micros, currency, lines_digest, provider, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [checkoutId, cart.merchantId, cartId, 'pending', decision.decisionId, totalMicros, currency, linesDigest(lines), providerName, nowIso()],
     );
 
     if (decision.status === 'awaiting_approval' || decision.status === 'blocked') {
@@ -181,7 +181,7 @@ export class CheckoutService {
         status: decision.status,
       });
     }
-    return this.finalize(String(row.id), cart.id, lines, snapshotTotal, snapshotCurrency ?? currentCurrency, 'fake');
+    return this.finalize(String(row.id), cart.id, lines, snapshotTotal, snapshotCurrency ?? currentCurrency, String(row.provider ?? 'fake'));
   }
 
   async rejectCheckout(decisionId: string, approver: string, comment?: string): Promise<{ checkoutId: string; status: 'rejected' }> {
@@ -349,7 +349,7 @@ export class CheckoutService {
       cartId: String(r.cart_id),
       ...(r.order_id ? { orderId: String(r.order_id) } : {}),
       ...(r.payment_id ? { paymentId: String(r.payment_id) } : {}),
-      provider: String(r.payment_provider ?? ''),
+      provider: String(r.provider ?? r.payment_provider ?? ''),
       status: r.status as CheckoutStatus,
       totalMicros: Number(r.payment_amount_micros ?? 0),
       currency: String(r.order_currency ?? ''),
