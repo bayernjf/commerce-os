@@ -99,23 +99,12 @@ export function registerHttpRoutes(
     if (!secret) {
       throw new CommerceError('CREDENTIAL_MISSING', `webhook secret not configured for '${provider}'`, false, { provider });
     }
-    const body = (await c.req.json()) as {
-      deliveryId?: string;
-      paymentId?: string;
-      payload?: Record<string, unknown>;
-      signature?: string;
-    };
-    if (!body.deliveryId || !body.payload || !body.signature) {
-      throw new CommerceError('VALIDATION_FAILED', 'deliveryId, payload and signature are required');
-    }
-    const result = await services.storefrontWebhooks.handleDelivery({
-      provider,
-      secret,
-      deliveryId: body.deliveryId,
-      ...(body.paymentId ? { paymentId: body.paymentId } : {}),
-      payload: body.payload,
-      signature: body.signature,
-    });
+    // The HMAC covers the exact request bytes, so the signature travels in the
+    // x-signature header rather than inside the signed body (P2-3). The body
+    // is parsed only after verification, inside the service.
+    const rawBody = await c.req.text();
+    const signature = c.req.header('x-signature') ?? '';
+    const result = await services.storefrontWebhooks.handleDelivery({ provider, secret, signature, rawBody });
     return c.json({ result });
   });
 
