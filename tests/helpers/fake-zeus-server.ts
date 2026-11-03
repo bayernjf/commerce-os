@@ -24,6 +24,8 @@ export class FakeZeusServer {
   private seq = 0;
   url = '';
   readonly token = 'fake-token';
+  /** Test hook: the next approval response settles with this status, once. */
+  nextApproveStatus?: StoredDecision['status'];
 
   async start(): Promise<string> {
     const server = createServer((req, res) => this.handle(req, res));
@@ -82,7 +84,10 @@ export class FakeZeusServer {
       }
       const body = await readJson(req);
       if (body.decision === 'approve') {
-        stored.status = 'decided';
+        // Tests may script a non-settled approval (e.g. 'blocked') to prove
+        // callers fail closed on anything but 'decided' (review P2-1).
+        stored.status = this.nextApproveStatus ?? 'decided';
+        delete this.nextApproveStatus;
       } else {
         stored.status = 'rejected';
       }
