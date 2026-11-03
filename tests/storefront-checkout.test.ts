@@ -10,6 +10,7 @@ import { OrderService } from '../src/order/order-service.js';
 import { ChannelAccountService } from '../src/channel/channel-account-service.js';
 import { createDefaultRegistry } from '../src/channel/index.js';
 import type { CommerceDecision, DecisionPort } from '../src/decision/types.js';
+import type { PaymentPort } from '../src/storefront/payment-port.js';
 
 function decidedPort(): DecisionPort {
   return {
@@ -109,6 +110,42 @@ describe('storefront checkout service (SF-04)', () => {
     expect(cart.status).toBe('open');
     const order = await orders.getOrder(checkout.orderId as string);
     expect(order.status).toBe('imported');
+  });
+
+  it('releases the cart when the provider call throws mid-finalize (P2-6)', async () => {
+    const { cartId } = await cartWithItems([99.9]);
+    // A provider whose create() throws (e.g. gateway unreachable).
+    const outage: PaymentPort = {
+      provider: 'fake',
+      sandbox: true,
+      create: async () => { throw new Error('provider unreachable'); },
+      confirm: async () => { throw new Error('provider unreachable'); },
+      refund: async () => { throw new Error('provider unreachable'); },
+      getStatus: async () => { throw new Error('provider unreachable'); },
+      verifyWebhook: async () => false,
+    };
+    const outageRegistry = new PaymentRegistry();
+    outageRegistry.register(outage);
+    const failing = new CheckoutService(driver, carts, orders, outageRegistry, decidedPort());
+
+    await expect(failing.checkout(cartId)).rejects.toThrow('provider unreachable');
+
+    // The checkout is closed as failed — not stranded in pending — and its
+    // payment attempt is closed too.
+    const stuck = await driver.get<Record<string, unknown>>('SELECT id, status FROM checkouts WHERE cart_id = ?', [cartId]);
+    expect(stuck?.status).toBe('failed');
+    const payRow = await driver.get<Record<string, unknown>>(
+      'SELECT p.status FROM payments p JOIN checkouts c ON c.id = p.checkout_id WHERE c.cart_id = ?',
+      [cartId],
+    );
+    expect(payRow?.status).toBe('failed');
+
+    // The released cart can be checked out again with a healthy provider.
+    const retry = await checkouts.checkout(cartId);
+    expect(retry.status).toBe('paid');
+    expect(retry.id).not.toBe(String(stuck?.id)); // fresh checkout row
+    const all = await driver.all('SELECT id, status FROM checkouts WHERE cart_id = ? ORDER BY created_at', [cartId]);
+    expect(all).toHaveLength(2);
   });
 
   it('rejects empty carts, non-open carts and unknown carts', async () => {
