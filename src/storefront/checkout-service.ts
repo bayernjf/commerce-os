@@ -174,6 +174,13 @@ export class CheckoutService {
       await this.markRejected(String(row.id));
       throw conflictError(`checkout decision was rejected: ${decisionId}`, { decisionId });
     }
+    // Fail closed on anything but a settled approval (review 2026-11-02 P2-1).
+    if (decision.status !== 'decided') {
+      throw conflictError(`checkout decision is not approved: ${decisionId} (status ${decision.status})`, {
+        decisionId,
+        status: decision.status,
+      });
+    }
     return this.finalize(String(row.id), cart.id, lines, snapshotTotal, snapshotCurrency ?? currentCurrency, 'fake');
   }
 

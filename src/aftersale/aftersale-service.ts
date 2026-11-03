@@ -164,6 +164,15 @@ export class AftersaleService {
       return this.getRefund(refundId);
     }
 
+    // Fail closed on anything but a settled approval: a held/blocked/unknown
+    // status must never reach the channel (review 2026-11-02 P2-1).
+    if (decision.status !== 'decided') {
+      throw new CommerceError('CONFLICT', `refund decision is not approved: ${decision.status}`, false, {
+        decisionId: refund.decisionId,
+        status: decision.status,
+      });
+    }
+
     // Concurrent approvals must not both reach the channel: claim the refund by
     // flipping the state exactly once. The loser sees 0 changes and stops here.
     const claim = await this.driver.run(

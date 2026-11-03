@@ -125,6 +125,13 @@ export class PublishingService {
     if (decision.status === 'rejected') {
       throw new CommerceError('CONFLICT', `listing decision was rejected: ${decisionId}`, false, { decisionId });
     }
+    // Fail closed on anything but a settled approval (review 2026-11-02 P2-1).
+    if (decision.status !== 'decided') {
+      throw new CommerceError('CONFLICT', `listing decision is not approved: ${decision.status}`, false, {
+        decisionId,
+        status: decision.status,
+      });
+    }
     return this.executeListing(productId, channelAccountId, contentId, decisionId);
   }
 
