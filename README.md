@@ -45,6 +45,7 @@ npm install
 npm run check:migrations   # 双方言迁移配对校验
 npm run typecheck
 npm run lint
+npm run lint:secrets       # 密钥边界扫描（文档占位值走显式 allowlist）
 npm test                   # 48 用例（含经假 zeus HTTP 服务器的真实 zeus-client 链路）
 npm run build
 
