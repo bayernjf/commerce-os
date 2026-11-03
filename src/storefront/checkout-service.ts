@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { StorageDriver } from '../storage/driver.js';
-import { CommerceError } from '../util/errors.js';
+import { CommerceError, isUniqueViolation } from '../util/errors.js';
 import { newId, nowIso } from '../util/ids.js';
 import type { CartService } from './cart-service.js';
 import type { PaymentRegistry } from './payment-registry.js';
@@ -211,12 +211,22 @@ export class CheckoutService {
 
     const now = nowIso();
     const paymentId = newId('pay');
+    // Claim the checkout's single payment slot BEFORE any money moves: the
+    // unique index on payments.checkout_id makes a raced second finalize fail
+    // here with a CONFLICT instead of charging the provider twice (P2-5).
+    try {
+      await this.driver.run(
+        `INSERT INTO payments (id, checkout_id, provider, status, external_ref, amount_micros, raw_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [paymentId, checkoutId, port.provider, 'created', null, totalMicros, '{}', now, now],
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw conflictError(`checkout already has a payment in flight or completed: ${checkoutId}`, { checkoutId });
+      }
+      throw error;
+    }
     await port.create({ paymentId, amountMicros: totalMicros, currency });
-    await this.driver.run(
-      `INSERT INTO payments (id, checkout_id, provider, status, external_ref, amount_micros, raw_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [paymentId, checkoutId, port.provider, 'created', null, totalMicros, '{}', now, now],
-    );
 
     const confirmed = await port.confirm(paymentId);
     const status: 'paid' | 'failed' = confirmed.status === 'confirmed' ? 'paid' : 'failed';
@@ -327,11 +337,23 @@ export class CheckoutService {
 
     const now = nowIso();
     const orderId = newId('ord', externalOrderId);
-    await this.driver.run(
-      `INSERT INTO orders (id, channel, external_order_id, status, total_amount, currency, created_at, imported_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, 'storefront', externalOrderId, 'imported', totalMicros / 1_000_000, currency, now, now],
-    );
+    try {
+      await this.driver.run(
+        `INSERT INTO orders (id, channel, external_order_id, status, total_amount, currency, created_at, imported_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderId, 'storefront', externalOrderId, 'imported', totalMicros / 1_000_000, currency, now, now],
+      );
+    } catch (error) {
+      // A raced finalize found no row above and lost the insert: the winner's
+      // order is the one true order — adopt it (P2-5).
+      if (!isUniqueViolation(error)) throw error;
+      const winner = await this.driver.get<Record<string, unknown>>(
+        'SELECT id FROM orders WHERE channel = ? AND external_order_id = ?',
+        ['storefront', externalOrderId],
+      );
+      if (!winner) throw error;
+      return { id: String(winner.id) };
+    }
     for (const line of lines) {
       const itemId = newId('itm', `${externalOrderId}-${line.skuCode}`);
       await this.driver.run(
