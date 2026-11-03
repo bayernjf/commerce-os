@@ -50,12 +50,15 @@ export class DashboardService {
     const refundRows = await this.driver.all<Record<string, unknown>>('SELECT * FROM refunds', []);
     const listedEvents = await this.events.list({ eventType: 'product.listed' });
 
+    // GMV口径：只统计已支付订单（P2-8）。未支付订单（如支付失败停在
+    // imported）计入 gross/net 会虚高经营口径；total 仍覆盖全部订单。
+    const paidRows = orderRows.filter((r) => PAID_STATUSES.has(String(r.status)));
     const grossAmount = round2(
-      orderRows.reduce((sum, r) => sum + Number(r.total_amount ?? 0), 0),
+      paidRows.reduce((sum, r) => sum + Number(r.total_amount ?? 0), 0),
     );
     const orders: OrderMetrics = {
       total: orderRows.length,
-      paid: orderRows.filter((r) => PAID_STATUSES.has(String(r.status))).length,
+      paid: paidRows.length,
       completed: orderRows.filter((r) => r.status === 'completed').length,
       grossAmount,
     };
