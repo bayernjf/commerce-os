@@ -231,9 +231,16 @@ export class CheckoutService {
       }
       throw error;
     }
-    await port.create({ paymentId, amountMicros: totalMicros, currency });
-
-    const confirmed = await port.confirm(paymentId);
+    let confirmed;
+    try {
+      await port.create({ paymentId, amountMicros: totalMicros, currency });
+      confirmed = await port.confirm(paymentId);
+    } catch (error) {
+      // P2-6: a provider error must not strand the checkout in pending
+      // forever — close the payment attempt and release the cart.
+      await this.markFinalizeFailed(checkoutId, cartId, paymentId, error);
+      throw error;
+    }
     const status: 'paid' | 'failed' = confirmed.status === 'confirmed' ? 'paid' : 'failed';
     const decidedAt = nowIso();
     await this.driver.run(
@@ -266,6 +273,40 @@ export class CheckoutService {
 
   private async markRejected(checkoutId: string): Promise<void> {
     await this.driver.run(`UPDATE checkouts SET status = 'rejected', decided_at = ? WHERE id = ?`, [nowIso(), checkoutId]);
+  }
+
+  /**
+   * Best-effort cleanup after a provider error mid-finalize (P2-6): close our
+   * own payment attempt and flip the checkout to failed so the cart is
+   * released and the shopper can re-initiate. The conditional update only
+   * fires while no live (created/confirmed) payment row exists, so a raced
+   * concurrent finalize that owns its own payment can never be clobbered.
+   * The original provider error is the one that matters, so cleanup failures
+   * are swallowed.
+   */
+  private async markFinalizeFailed(checkoutId: string, cartId: string, paymentId: string, cause: unknown): Promise<void> {
+    try {
+      await this.driver.run(
+        `UPDATE payments SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'created'`,
+        [nowIso(), paymentId],
+      );
+      await this.driver.run(
+        `UPDATE checkouts SET status = 'failed', decided_at = ?
+         WHERE id = ? AND status = 'pending'
+           AND NOT EXISTS (
+             SELECT 1 FROM payments p
+             WHERE p.checkout_id = checkouts.id AND p.status IN ('created', 'confirmed')
+           )`,
+        [nowIso(), checkoutId],
+      );
+      await this.recordEvent('checkout.finalize_failed', checkoutId, {
+        cartId,
+        paymentId,
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    } catch {
+      // Best-effort: never mask the original provider error.
+    }
   }
 
   private async recordEvent(eventType: string, refId: string, payload: Record<string, unknown>): Promise<void> {
