@@ -63,3 +63,9 @@ export function errorBody(err: CommerceError): { code: string; message: string; 
     ...(err.details ? { details: err.details } : {}),
   };
 }
+
+/** sqlite reports the message, postgres the SQLSTATE — accept both dialects. */
+export function isUniqueViolation(error: unknown): boolean {
+  if (error instanceof Error && /unique constraint failed/i.test(error.message)) return true;
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === '23505';
+}

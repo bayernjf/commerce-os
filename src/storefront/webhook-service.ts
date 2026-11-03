@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { StorageDriver } from '../storage/driver.js';
 import type { EventLog } from '../storage/event-log.js';
-import { CommerceError } from '../util/errors.js';
+import { CommerceError, isUniqueViolation } from '../util/errors.js';
 import { newId, nowIso } from '../util/ids.js';
 
 /**
@@ -50,17 +50,24 @@ export class WebhookService {
     const expected = signPayload(raw, input.secret);
     const provided = String(input.signature ?? '');
     if (!safeEqual(expected, provided)) {
-      await this.recordDelivery(input.provider, input.deliveryId, input.paymentId, 'rejected', raw);
+      await this.recordRejected(input, raw);
       throw signatureInvalidError();
     }
 
     const existing = await this.driver.get<Record<string, unknown>>(
-      'SELECT id FROM webhook_deliveries WHERE provider = ? AND delivery_id = ?',
+      // Only a processed delivery occupies the deliveryId: a rejected record is
+      // an audit trail, not a dedup marker — otherwise a bad-signature request
+      // could squat a deliveryId and the gateway's legitimate retry would be
+      // swallowed as a duplicate forever (review 2026-11-02 P2-2).
+      "SELECT id FROM webhook_deliveries WHERE provider = ? AND delivery_id = ? AND status = 'processed'",
       [input.provider, input.deliveryId],
     );
     if (existing) return { status: 'duplicate', deliveryId: input.deliveryId };
 
-    await this.recordDelivery(input.provider, input.deliveryId, input.paymentId, 'processed', raw);
+    if (!(await this.claimDelivery(input, raw))) {
+      // A concurrent verified delivery won the row between the check and here.
+      return { status: 'duplicate', deliveryId: input.deliveryId };
+    }
     if (this.events && input.paymentId) {
       await this.events.record({
         eventType: 'payment.webhook_delivered',
@@ -72,18 +79,47 @@ export class WebhookService {
     return { status: 'processed', deliveryId: input.deliveryId };
   }
 
-  private async recordDelivery(
-    provider: string,
-    deliveryId: string,
-    paymentId: string | undefined,
-    status: 'processed' | 'duplicate' | 'rejected',
-    raw: string,
-  ): Promise<void> {
-    await this.driver.run(
-      `INSERT INTO webhook_deliveries (id, provider, delivery_id, payment_id, status, raw_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [newId('whk'), provider, deliveryId, paymentId ?? null, status, raw, nowIso()],
+  /**
+   * Audit a rejected delivery. The (provider, delivery_id) unique key means a
+   * repeat bad-signature attempt cannot be recorded twice — the first row is
+   * kept and the duplicate insert is simply skipped.
+   */
+  private async recordRejected(input: HandleDeliveryInput, raw: string): Promise<void> {
+    try {
+      await this.driver.run(
+        `INSERT INTO webhook_deliveries (id, provider, delivery_id, payment_id, status, raw_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [newId('whk'), input.provider, input.deliveryId, input.paymentId ?? null, 'rejected', raw, nowIso()],
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) return;
+      throw error;
+    }
+  }
+
+  /**
+   * Take ownership of the (provider, deliveryId) row for a verified delivery:
+   * upgrade a squatting rejected row in place, or insert fresh. False means a
+   * concurrent delivery already owns the row.
+   */
+  private async claimDelivery(input: HandleDeliveryInput, raw: string): Promise<boolean> {
+    const upgraded = await this.driver.run(
+      `UPDATE webhook_deliveries SET status = 'processed', payment_id = ?, raw_json = ?
+       WHERE provider = ? AND delivery_id = ? AND status = 'rejected'`,
+      [input.paymentId ?? null, raw, input.provider, input.deliveryId],
     );
+    if (upgraded.changes > 0) return true;
+    try {
+      await this.driver.run(
+        `INSERT INTO webhook_deliveries (id, provider, delivery_id, payment_id, status, raw_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [newId('whk'), input.provider, input.deliveryId, input.paymentId ?? null, 'processed', raw, nowIso()],
+      );
+      return true;
+    } catch (error) {
+      if (isUniqueViolation(error)) return false;
+      throw error;
+    }
   }
 }
 
