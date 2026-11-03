@@ -88,6 +88,11 @@ export class CheckoutService {
 
     const lines = await this.loadLines(cartId);
     if (lines.length === 0) throw validationError(`cart is empty: ${cartId}`, { cartId });
+    const currencies = [...new Set(lines.map((l) => l.currency))];
+    if (currencies.length > 1) {
+      // Summing across currencies would charge a meaningless total (P2-7).
+      throw validationError(`cart mixes currencies: ${currencies.join(', ')}`, { cartId, currencies });
+    }
 
     const totalMicros = lines.reduce((sum, l) => sum + l.unitAmountMicros * l.qty, 0);
     const currency = String(lines[0]?.currency ?? 'CNY');
