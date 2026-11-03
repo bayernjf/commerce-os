@@ -112,26 +112,29 @@ describe('storefront HTTP layer (SF-08)', () => {
 
   it('verifies webhook signatures and keeps public endpoints separate from ops Bearer', async () => {
     const payload = { type: 'payment.confirmed', paymentId: 'pay_9' };
-    const signature = signPayload(JSON.stringify(payload), WEBHOOK_SECRET);
-
+    // P2-3: the HMAC signs the exact request bytes; the signature travels in
+    // the x-signature header so it is not part of its own signed input.
+    const okBody = JSON.stringify({ deliveryId: 'del_9', paymentId: 'pay_9', payload });
     const ok = await app.request('/api/v1/storefront/webhooks/fake', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deliveryId: 'del_9', paymentId: 'pay_9', payload, signature }),
+      headers: { 'content-type': 'application/json', 'x-signature': signPayload(okBody, WEBHOOK_SECRET) },
+      body: okBody,
     });
     expect(ok.status).toBe(200);
 
+    const badBody = JSON.stringify({ deliveryId: 'del_bad', paymentId: 'pay_9', payload });
     const bad = await app.request('/api/v1/storefront/webhooks/fake', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deliveryId: 'del_bad', paymentId: 'pay_9', payload, signature: 'nope' }),
+      headers: { 'content-type': 'application/json', 'x-signature': 'nope' },
+      body: badBody,
     });
     expect(bad.status).toBe(401);
 
+    const unconfiguredBody = JSON.stringify({ deliveryId: 'del_1', payload });
     const unconfigured = await app.request('/api/v1/storefront/webhooks/stripe', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deliveryId: 'del_1', payload, signature }),
+      headers: { 'content-type': 'application/json', 'x-signature': signPayload(unconfiguredBody, WEBHOOK_SECRET) },
+      body: unconfiguredBody,
     });
     expect(unconfigured.status).toBe(422);
 
@@ -146,10 +149,11 @@ describe('storefront HTTP layer (SF-08)', () => {
     expect(adminNoToken.status).toBe(401);
     const catalogPublic = await secured.request('/api/v1/storefront/catalog');
     expect(catalogPublic.status).toBe(200);
+    const publicBody = JSON.stringify({ deliveryId: 'del_2', payload });
     const webhookPublic = await secured.request('/api/v1/storefront/webhooks/fake', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deliveryId: 'del_2', payload, signature }),
+      headers: { 'content-type': 'application/json', 'x-signature': signPayload(publicBody, WEBHOOK_SECRET) },
+      body: publicBody,
     });
     expect(webhookPublic.status).toBe(200);
   });

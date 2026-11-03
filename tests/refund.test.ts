@@ -77,4 +77,19 @@ describe('after-sale refund flow (T-M3-08)', () => {
       h.services.aftersales.decideRefund(held.id, 'approve', 'tester'),
     ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
+
+  it('an unsettled approval (blocked) never reaches the channel (P2-1)', async () => {
+    const order = await h.services.orders.getOrder(orderId);
+    const held = await h.services.aftersales.requestRefund(orderId, {
+      lines: [{ orderItemId: order.lines[0]!.id, qty: 1 }],
+      reason: '少发',
+    });
+    expect(held.status).toBe('awaiting_approval');
+    h.zeus.nextApproveStatus = 'blocked';
+    await expect(h.services.aftersales.decideRefund(held.id, 'approve', 'tester')).rejects.toMatchObject({ code: 'CONFLICT' });
+    // The refund stays parked — not rejected, not executed.
+    const after = await h.services.aftersales.getRefund(held.id);
+    expect(after.status).toBe('awaiting_approval');
+    expect(after.externalRefundRef).toBeUndefined();
+  });
 });

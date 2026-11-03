@@ -36,7 +36,9 @@ describe('operating dashboard (T-M5-04)', () => {
 
   it('aggregates orders, succeeded refunds, published content and net', async () => {
     const orderId = await insertOrder(h, 1299);
-    await insertOrder(h, 0, 'imported');
+    // Unpaid (imported) order with a nonzero amount: it counts toward the
+    // order total but must not inflate gross/net (P2-8).
+    await insertOrder(h, 500, 'imported');
 
     // A succeeded refund with two lines totalling 200.
     await h.driver.run(

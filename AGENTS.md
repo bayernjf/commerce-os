@@ -20,7 +20,7 @@
 ## 验证门（交付前全绿）
 
 ```bash
-npm run check:migrations && npm run typecheck && npm run lint && npm test && npm run build
+npm run check:migrations && npm run typecheck && npm run lint && npm run lint:secrets && npm test && npm run build
 ```
 
 测试经 `tests/helpers/fake-zeus-server.ts` 起真实 HTTP 服务器，让 `zeus-client` 走完整网络路径；禁止用本地分级替身替代。

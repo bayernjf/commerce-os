@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { StorageDriver } from '../storage/driver.js';
-import { CommerceError } from '../util/errors.js';
+import { CommerceError, isUniqueViolation } from '../util/errors.js';
 import { newId, nowIso } from '../util/ids.js';
 import type { CartService } from './cart-service.js';
 import type { PaymentRegistry } from './payment-registry.js';
@@ -88,6 +88,11 @@ export class CheckoutService {
 
     const lines = await this.loadLines(cartId);
     if (lines.length === 0) throw validationError(`cart is empty: ${cartId}`, { cartId });
+    const currencies = [...new Set(lines.map((l) => l.currency))];
+    if (currencies.length > 1) {
+      // Summing across currencies would charge a meaningless total (P2-7).
+      throw validationError(`cart mixes currencies: ${currencies.join(', ')}`, { cartId, currencies });
+    }
 
     const totalMicros = lines.reduce((sum, l) => sum + l.unitAmountMicros * l.qty, 0);
     const currency = String(lines[0]?.currency ?? 'CNY');
@@ -114,9 +119,9 @@ export class CheckoutService {
     });
 
     await this.driver.run(
-      `INSERT INTO checkouts (id, merchant_id, cart_id, status, decision_id, total_micros, currency, lines_digest, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [checkoutId, cart.merchantId, cartId, 'pending', decision.decisionId, totalMicros, currency, linesDigest(lines), nowIso()],
+      `INSERT INTO checkouts (id, merchant_id, cart_id, status, decision_id, total_micros, currency, lines_digest, provider, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [checkoutId, cart.merchantId, cartId, 'pending', decision.decisionId, totalMicros, currency, linesDigest(lines), providerName, nowIso()],
     );
 
     if (decision.status === 'awaiting_approval' || decision.status === 'blocked') {
@@ -174,7 +179,14 @@ export class CheckoutService {
       await this.markRejected(String(row.id));
       throw conflictError(`checkout decision was rejected: ${decisionId}`, { decisionId });
     }
-    return this.finalize(String(row.id), cart.id, lines, snapshotTotal, snapshotCurrency ?? currentCurrency, 'fake');
+    // Fail closed on anything but a settled approval (review 2026-11-02 P2-1).
+    if (decision.status !== 'decided') {
+      throw conflictError(`checkout decision is not approved: ${decisionId} (status ${decision.status})`, {
+        decisionId,
+        status: decision.status,
+      });
+    }
+    return this.finalize(String(row.id), cart.id, lines, snapshotTotal, snapshotCurrency ?? currentCurrency, String(row.provider ?? 'fake'));
   }
 
   async rejectCheckout(decisionId: string, approver: string, comment?: string): Promise<{ checkoutId: string; status: 'rejected' }> {
@@ -204,14 +216,31 @@ export class CheckoutService {
 
     const now = nowIso();
     const paymentId = newId('pay');
-    await port.create({ paymentId, amountMicros: totalMicros, currency });
-    await this.driver.run(
-      `INSERT INTO payments (id, checkout_id, provider, status, external_ref, amount_micros, raw_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [paymentId, checkoutId, port.provider, 'created', null, totalMicros, '{}', now, now],
-    );
-
-    const confirmed = await port.confirm(paymentId);
+    // Claim the checkout's single payment slot BEFORE any money moves: the
+    // unique index on payments.checkout_id makes a raced second finalize fail
+    // here with a CONFLICT instead of charging the provider twice (P2-5).
+    try {
+      await this.driver.run(
+        `INSERT INTO payments (id, checkout_id, provider, status, external_ref, amount_micros, raw_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [paymentId, checkoutId, port.provider, 'created', null, totalMicros, '{}', now, now],
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw conflictError(`checkout already has a payment in flight or completed: ${checkoutId}`, { checkoutId });
+      }
+      throw error;
+    }
+    let confirmed;
+    try {
+      await port.create({ paymentId, amountMicros: totalMicros, currency });
+      confirmed = await port.confirm(paymentId);
+    } catch (error) {
+      // P2-6: a provider error must not strand the checkout in pending
+      // forever — close the payment attempt and release the cart.
+      await this.markFinalizeFailed(checkoutId, cartId, paymentId, error);
+      throw error;
+    }
     const status: 'paid' | 'failed' = confirmed.status === 'confirmed' ? 'paid' : 'failed';
     const decidedAt = nowIso();
     await this.driver.run(
@@ -244,6 +273,40 @@ export class CheckoutService {
 
   private async markRejected(checkoutId: string): Promise<void> {
     await this.driver.run(`UPDATE checkouts SET status = 'rejected', decided_at = ? WHERE id = ?`, [nowIso(), checkoutId]);
+  }
+
+  /**
+   * Best-effort cleanup after a provider error mid-finalize (P2-6): close our
+   * own payment attempt and flip the checkout to failed so the cart is
+   * released and the shopper can re-initiate. The conditional update only
+   * fires while no live (created/confirmed) payment row exists, so a raced
+   * concurrent finalize that owns its own payment can never be clobbered.
+   * The original provider error is the one that matters, so cleanup failures
+   * are swallowed.
+   */
+  private async markFinalizeFailed(checkoutId: string, cartId: string, paymentId: string, cause: unknown): Promise<void> {
+    try {
+      await this.driver.run(
+        `UPDATE payments SET status = 'failed', updated_at = ? WHERE id = ? AND status = 'created'`,
+        [nowIso(), paymentId],
+      );
+      await this.driver.run(
+        `UPDATE checkouts SET status = 'failed', decided_at = ?
+         WHERE id = ? AND status = 'pending'
+           AND NOT EXISTS (
+             SELECT 1 FROM payments p
+             WHERE p.checkout_id = checkouts.id AND p.status IN ('created', 'confirmed')
+           )`,
+        [nowIso(), checkoutId],
+      );
+      await this.recordEvent('checkout.finalize_failed', checkoutId, {
+        cartId,
+        paymentId,
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    } catch {
+      // Best-effort: never mask the original provider error.
+    }
   }
 
   private async recordEvent(eventType: string, refId: string, payload: Record<string, unknown>): Promise<void> {
@@ -320,11 +383,23 @@ export class CheckoutService {
 
     const now = nowIso();
     const orderId = newId('ord', externalOrderId);
-    await this.driver.run(
-      `INSERT INTO orders (id, channel, external_order_id, status, total_amount, currency, created_at, imported_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, 'storefront', externalOrderId, 'imported', totalMicros / 1_000_000, currency, now, now],
-    );
+    try {
+      await this.driver.run(
+        `INSERT INTO orders (id, channel, external_order_id, status, total_amount, currency, created_at, imported_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [orderId, 'storefront', externalOrderId, 'imported', totalMicros / 1_000_000, currency, now, now],
+      );
+    } catch (error) {
+      // A raced finalize found no row above and lost the insert: the winner's
+      // order is the one true order — adopt it (P2-5).
+      if (!isUniqueViolation(error)) throw error;
+      const winner = await this.driver.get<Record<string, unknown>>(
+        'SELECT id FROM orders WHERE channel = ? AND external_order_id = ?',
+        ['storefront', externalOrderId],
+      );
+      if (!winner) throw error;
+      return { id: String(winner.id) };
+    }
     for (const line of lines) {
       const itemId = newId('itm', `${externalOrderId}-${line.skuCode}`);
       await this.driver.run(
@@ -342,7 +417,7 @@ export class CheckoutService {
       cartId: String(r.cart_id),
       ...(r.order_id ? { orderId: String(r.order_id) } : {}),
       ...(r.payment_id ? { paymentId: String(r.payment_id) } : {}),
-      provider: String(r.payment_provider ?? ''),
+      provider: String(r.provider ?? r.payment_provider ?? ''),
       status: r.status as CheckoutStatus,
       totalMicros: Number(r.payment_amount_micros ?? 0),
       currency: String(r.order_currency ?? ''),

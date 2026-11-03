@@ -9,7 +9,8 @@ import { CheckoutService } from '../src/storefront/checkout-service.js';
 import { OrderService } from '../src/order/order-service.js';
 import { ChannelAccountService } from '../src/channel/channel-account-service.js';
 import { createDefaultRegistry } from '../src/channel/index.js';
-import type { DecisionPort } from '../src/decision/types.js';
+import type { CommerceDecision, DecisionPort } from '../src/decision/types.js';
+import type { PaymentPort } from '../src/storefront/payment-port.js';
 
 function decidedPort(): DecisionPort {
   return {
@@ -19,12 +20,22 @@ function decidedPort(): DecisionPort {
   };
 }
 
+/** A checkout held for approval; the approval settles with a scripted status. */
+function heldPort(approveStatus: CommerceDecision['status'] = 'decided'): DecisionPort {
+  return {
+    decide: async () => ({ decisionId: 'dec_held', grade: 'D2', mode: 'approve-sync', status: 'awaiting_approval', ruleId: 'test' }),
+    approve: async (id) => ({ decisionId: id, grade: 'D2', mode: 'approve-sync', status: approveStatus, ruleId: 'test' }),
+    reject: async (id) => ({ decisionId: id, grade: 'D2', mode: 'approve-sync', status: 'rejected', ruleId: 'test' }),
+  };
+}
+
 describe('storefront checkout service (SF-04)', () => {
   let driver: SqliteDriver;
   let products: ProductService;
   let carts: CartService;
   let checkouts: CheckoutService;
   let orders: OrderService;
+  let payments: PaymentRegistry;
 
   beforeEach(async () => {
     driver = new SqliteDriver(':memory:');
@@ -35,7 +46,7 @@ describe('storefront checkout service (SF-04)', () => {
     products = new ProductService(driver);
     carts = new CartService(driver);
     orders = new OrderService(driver, registry, accounts, eventLog);
-    const payments = new PaymentRegistry();
+    payments = new PaymentRegistry();
     payments.register(new FakePaymentProvider());
     checkouts = new CheckoutService(driver, carts, orders, payments, decidedPort());
   });
@@ -101,10 +112,104 @@ describe('storefront checkout service (SF-04)', () => {
     expect(order.status).toBe('imported');
   });
 
+  it('releases the cart when the provider call throws mid-finalize (P2-6)', async () => {
+    const { cartId } = await cartWithItems([99.9]);
+    // A provider whose create() throws (e.g. gateway unreachable).
+    const outage: PaymentPort = {
+      provider: 'fake',
+      sandbox: true,
+      create: async () => { throw new Error('provider unreachable'); },
+      confirm: async () => { throw new Error('provider unreachable'); },
+      refund: async () => { throw new Error('provider unreachable'); },
+      getStatus: async () => { throw new Error('provider unreachable'); },
+      verifyWebhook: async () => false,
+    };
+    const outageRegistry = new PaymentRegistry();
+    outageRegistry.register(outage);
+    const failing = new CheckoutService(driver, carts, orders, outageRegistry, decidedPort());
+
+    await expect(failing.checkout(cartId)).rejects.toThrow('provider unreachable');
+
+    // The checkout is closed as failed — not stranded in pending — and its
+    // payment attempt is closed too.
+    const stuck = await driver.get<Record<string, unknown>>('SELECT id, status FROM checkouts WHERE cart_id = ?', [cartId]);
+    expect(stuck?.status).toBe('failed');
+    const payRow = await driver.get<Record<string, unknown>>(
+      'SELECT p.status FROM payments p JOIN checkouts c ON c.id = p.checkout_id WHERE c.cart_id = ?',
+      [cartId],
+    );
+    expect(payRow?.status).toBe('failed');
+
+    // The released cart can be checked out again with a healthy provider.
+    const retry = await checkouts.checkout(cartId);
+    expect(retry.status).toBe('paid');
+    expect(retry.id).not.toBe(String(stuck?.id)); // fresh checkout row
+    const all = await driver.all('SELECT id, status FROM checkouts WHERE cart_id = ? ORDER BY created_at', [cartId]);
+    expect(all).toHaveLength(2);
+  });
+
   it('rejects empty carts, non-open carts and unknown carts', async () => {
     const empty = await carts.createCart({ merchantId: 'mer_owner' });
     await expect(checkouts.checkout(empty.id)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
 
     await expect(checkouts.checkout('cart_unknown')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+
+  it('refuses to finalize when the approval comes back unsettled (P2-1)', async () => {
+    const { cartId } = await cartWithItems();
+    const held = new CheckoutService(driver, carts, orders, payments, heldPort('blocked'));
+    const parked = await held.checkout(cartId);
+    expect(parked.status).toBe('pending');
+
+    await expect(held.approveCheckout('dec_held', 'ops')).rejects.toMatchObject({ code: 'CONFLICT' });
+    const after = await held.getCheckout(parked.id);
+    expect(after.status).toBe('pending'); // not silently rejected, not finalized
+    expect(after.paymentId).toBeUndefined(); // no money moved
+    expect(await driver.all('SELECT * FROM payments')).toHaveLength(0);
+  });
+
+  it('keeps the provider chosen at checkout through the approval (P2-4)', async () => {
+    // A second provider with a different name: the fake logic, relabeled.
+    payments.register(Object.assign(new FakePaymentProvider(), { provider: 'alt' }));
+    const { cartId } = await cartWithItems();
+    const held = new CheckoutService(driver, carts, orders, payments, heldPort('decided'));
+    const parked = await held.checkout(cartId, 'alt');
+    expect(parked.status).toBe('pending');
+
+    const approved = await held.approveCheckout('dec_held', 'ops');
+    expect(approved.status).toBe('paid');
+    expect(approved.provider).toBe('alt'); // not the hardcoded 'fake'
+    const payRow = await driver.get<Record<string, unknown>>('SELECT provider FROM payments WHERE checkout_id = ?', [parked.id]);
+    expect(payRow?.provider).toBe('alt');
+  });
+
+  it('settles a raced double approval onto a single payment (P2-5)', async () => {
+    const { cartId } = await cartWithItems();
+    const held = new CheckoutService(driver, carts, orders, payments, heldPort('decided'));
+    const parked = await held.checkout(cartId);
+
+    const [first, second] = await Promise.allSettled([
+      held.approveCheckout('dec_held', 'ops'),
+      held.approveCheckout('dec_held', 'ops'),
+    ]);
+    expect([first.status, second.status].sort()).toEqual(['fulfilled', 'rejected']);
+    const loser = [first, second].find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(loser.reason).toMatchObject({ code: 'CONFLICT' });
+    // Exactly one payment row and one paid checkout — no double charge.
+    expect(await driver.all('SELECT * FROM payments WHERE checkout_id = ?', [parked.id])).toHaveLength(1);
+    expect((await held.getCheckout(parked.id)).status).toBe('paid');
+  });
+
+  it('rejects a cart mixing currencies instead of summing across them (P2-7)', async () => {
+    const cart = await carts.createCart({ merchantId: 'mer_owner' });
+    const cny = await products.createProduct({ title: '人民币商品', skus: [{ skuCode: 'SKU-MIX-CNY', price: 10, currency: 'CNY' }] });
+    const usd = await products.createProduct({ title: 'usd item', skus: [{ skuCode: 'SKU-MIX-USD', price: 5, currency: 'USD' }] });
+    await products.setExternalRef(cny.id, 'ext-mix-cny');
+    await products.setExternalRef(usd.id, 'ext-mix-usd');
+    await carts.addItem(cart.id, { productId: cny.id, skuId: cny.skus[0]!.id, qty: 1 });
+    await carts.addItem(cart.id, { productId: usd.id, skuId: usd.skus[0]!.id, qty: 1 });
+
+    await expect(checkouts.checkout(cart.id)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    expect(await driver.all('SELECT * FROM checkouts')).toHaveLength(0);
   });
 });

@@ -71,4 +71,22 @@ describe('PublishingService ingestSource (T-M9-01/J1)', () => {
     expect(submitted.content.body.title).toBe('原始标题');
     expect(submitted.content.body.text).toContain('大容量');
   });
+
+  it('an unsettled approval (blocked) never executes the listing (P2-1)', async () => {
+    const account = await h.services.accounts.create({ channel: 'sandbox-douyin', displayName: 'shop' });
+    const product = await h.services.products.createProduct({
+      title: '待审商品',
+      channelAccountId: account.id,
+      skus: [{ skuCode: 'SKU-HELD', price: 100 }],
+    });
+    const submitted = await h.services.publishing.submitListing({
+      productId: product.id,
+      channelAccountId: account.id,
+    });
+    expect(submitted.status).toBe('awaiting_approval');
+    h.zeus.nextApproveStatus = 'blocked';
+    await expect(h.services.publishing.approveListing(submitted.decisionId!, 'ops')).rejects.toMatchObject({ code: 'CONFLICT' });
+    const listed = await h.services.events.list({ eventType: 'product.listed' });
+    expect(listed).toHaveLength(0);
+  });
 });
