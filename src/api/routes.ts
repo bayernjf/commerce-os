@@ -3,6 +3,10 @@ import { CommerceError, errorBody, httpStatusFor, type CommerceErrorCode } from 
 import type { CommerceServices } from '../services.js';
 import type { AlertKind, AlertReporter } from '../observability/alerts.js';
 import { issueCartToken, verifyCartToken } from '../storefront/cart-token.js';
+import { clientAddress, createFixedWindowLimiter } from './rate-limit.js';
+
+/** Anonymous cart creation: 20 carts per minute per client address. */
+export const CART_CREATE_RATE_LIMIT = { limit: 20, windowMs: 60_000 } as const;
 
 /** Map a retryable dependency error to its alert kind. */
 const ALERT_BY_CODE: Partial<Record<CommerceErrorCode, AlertKind>> = {
@@ -26,6 +30,9 @@ export function registerHttpRoutes(
   },
 ): void {
   const { services } = deps;
+  // Single-process limiter: see src/api/rate-limit.ts for the multi-instance
+  // caveat. Keyed by client address + method/path so other routes are unaffected.
+  const cartCreateLimiter = createFixedWindowLimiter(CART_CREATE_RATE_LIMIT);
 
   // ---- Storefront: public read + cart token (separate from ops Bearer) ---
   // Registered before the ops Bearer middleware so catalog and webhook stay
@@ -49,6 +56,20 @@ export function registerHttpRoutes(
   app.get('/api/v1/storefront/catalog/:id', async (c) => c.json({ item: await services.storefrontCatalog.getCatalogItem(c.req.param('id')) }));
 
   app.post('/api/v1/storefront/carts', async (c) => {
+    const verdict = cartCreateLimiter.consume(`${clientAddress(c)}|POST ${c.req.path}`);
+    if (!verdict.allowed) {
+      return c.json(
+        {
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'cart creation rate limit exceeded, retry later',
+            retryable: true,
+          },
+        },
+        429,
+        { 'Retry-After': String(verdict.retryAfterSeconds) },
+      );
+    }
     const cart = await services.storefrontCarts.createCart({ merchantId: 'mer_owner' });
     const token = deps.storefrontCartSecret ? issueCartToken(cart.id, deps.storefrontCartSecret) : undefined;
     return c.json({ cart, ...(token ? { cartToken: token } : {}) }, 201);
