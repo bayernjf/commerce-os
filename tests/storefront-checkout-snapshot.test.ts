@@ -51,6 +51,21 @@ describe('storefront checkout approval bound to cart snapshot (H5)', () => {
     expect(cart.status).toBe('checked_out');
   });
 
+  it('reports the real amount and currency while the checkout is pending (P3-6)', async () => {
+    const { cartId } = await cartWithItem(1299);
+    const pending = await h.services.storefrontCheckouts.checkout(cartId);
+
+    expect(pending.status).toBe('pending');
+    // No payment/order row exists yet; the response must use the checkout
+    // snapshot rather than 0 / ''.
+    expect(pending.totalMicros).toBe(1299_000_000);
+    expect(pending.currency).toBe('CNY');
+
+    const reloaded = await h.services.storefrontCheckouts.getCheckout(pending.id);
+    expect(reloaded.totalMicros).toBe(1299_000_000);
+    expect(reloaded.currency).toBe('CNY');
+  });
+
   it('refuses approval when qty drifted after checkout, then re-checkout gets a fresh decision', async () => {
     const { cartId, productId, skuId } = await cartWithItem(1299);
     const { checkoutId, decisionId } = await pendingCheckout(cartId);
