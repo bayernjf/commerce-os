@@ -34,6 +34,7 @@ async function main() {
       const status = await migrationStatus(driver);
       console.log(`applied: ${status.applied.join(', ') || '(none)'}`);
       console.log(`pending: ${status.pending.join(', ') || '(none)'}`);
+      console.log(`drifted: ${status.drifted.join(', ') || '(none)'}`);
     } else {
       throw new Error('usage: migrate.mjs up|status [--driver sqlite|postgres]');
     }

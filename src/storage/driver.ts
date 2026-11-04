@@ -13,5 +13,10 @@ export interface StorageDriver {
   run(sql: string, params?: readonly unknown[]): Promise<{ changes: number }>;
   /** Raw multi-statement execution (migrations only). */
   exec(sql: string): Promise<void>;
+  /**
+   * Run work as one atomic transaction (rollback on throw). Implemented by
+   * the real drivers; optional so narrow test doubles stay structural.
+   */
+  transaction?<T>(work: () => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }

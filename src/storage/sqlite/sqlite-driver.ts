@@ -38,6 +38,22 @@ export class SqliteDriver implements StorageDriver {
     this.db.exec(sql);
   }
 
+  async transaction<T>(work: () => Promise<T>): Promise<T> {
+    this.db.exec('BEGIN');
+    try {
+      const result = await work();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        // The original failure is the one that matters.
+      }
+      throw error;
+    }
+  }
+
   async close(): Promise<void> {
     this.db.close();
   }
