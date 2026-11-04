@@ -33,7 +33,7 @@ jobs:
           npm run build
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
       - name: Verify paired migrations (sqlite + postgres)
         run: npm run check:migrations
       - name: Typecheck

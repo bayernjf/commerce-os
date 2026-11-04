@@ -46,7 +46,7 @@ npm run check:migrations   # 双方言迁移配对校验
 npm run typecheck
 npm run lint
 npm run lint:secrets       # 密钥边界扫描（文档占位值走显式 allowlist）
-npm test                   # 48 用例（含经假 zeus HTTP 服务器的真实 zeus-client 链路）
+npm test                   # 170 用例 / 33 个测试文件（2026-11-04 Node 22 实测；含经假 zeus HTTP 服务器的真实 zeus-client 链路）
 npm run build
 
 npm run migrate:up         # 本地 sqlite 迁移（默认 ./data/commerce-os.db）

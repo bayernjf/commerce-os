@@ -419,8 +419,11 @@ export class CheckoutService {
       ...(r.payment_id ? { paymentId: String(r.payment_id) } : {}),
       provider: String(r.provider ?? r.payment_provider ?? ''),
       status: r.status as CheckoutStatus,
-      totalMicros: Number(r.payment_amount_micros ?? 0),
-      currency: String(r.order_currency ?? ''),
+      // Pending checkouts have no payment/order row yet (P3-6): fall back to
+      // the amount/currency snapshotted on the checkouts row at checkout time,
+      // so the held response reports the real total instead of 0/''.
+      totalMicros: Number(r.payment_amount_micros ?? r.total_micros ?? 0),
+      currency: String(r.order_currency ?? r.currency ?? ''),
       ...(r.decision_id ? { decisionId: String(r.decision_id) } : {}),
       createdAt: String(r.created_at),
       ...(r.decided_at ? { decidedAt: String(r.decided_at) } : {}),

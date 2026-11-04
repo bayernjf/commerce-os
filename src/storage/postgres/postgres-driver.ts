@@ -64,6 +64,22 @@ export class PostgresDriver implements StorageDriver {
     await this.client.query(sql);
   }
 
+  async transaction<T>(work: () => Promise<T>): Promise<T> {
+    await this.client.query('BEGIN');
+    try {
+      const result = await work();
+      await this.client.query('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await this.client.query('ROLLBACK');
+      } catch {
+        // The original failure is the one that matters.
+      }
+      throw error;
+    }
+  }
+
   async close(): Promise<void> {
     await this.client.end();
   }
