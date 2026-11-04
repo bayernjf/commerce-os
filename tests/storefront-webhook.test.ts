@@ -126,4 +126,31 @@ describe('payment webhook receiver (SF-07)', () => {
     const rows = await driver.all('SELECT * FROM webhook_deliveries WHERE delivery_id = ?', ['del_spam']);
     expect(rows).toHaveLength(1);
   });
+
+  it('prunes rejected rows outside the retention window without touching recent or processed rows', async () => {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const oldIso = new Date(Date.now() - 60 * DAY_MS).toISOString();
+    const recentIso = new Date(Date.now() - 1 * DAY_MS).toISOString();
+    const insert = (id: string, deliveryId: string, status: string, createdAt: string) =>
+      driver.run(
+        `INSERT INTO webhook_deliveries (id, provider, delivery_id, payment_id, status, raw_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [id, 'fake', deliveryId, null, status, '{}', createdAt],
+      );
+    await insert('whk_old', 'del_old', 'rejected', oldIso);
+    await insert('whk_recent', 'del_recent', 'rejected', recentIso);
+    // Processed payloads are dedup markers: they must never be pruned.
+    await insert('whk_proc_old', 'del_proc_old', 'processed', oldIso);
+
+    // A fresh bad-signature delivery runs the prune pass.
+    const rawBody = envelopeRaw({ deliveryId: 'del_new' });
+    await expect(
+      webhooks.handleDelivery(signedInput(rawBody, { signature: 'deadbeef' })),
+    ).rejects.toMatchObject({ code: 'WEBHOOK_SIGNATURE_INVALID' });
+
+    expect(await driver.get('SELECT id FROM webhook_deliveries WHERE delivery_id = ?', ['del_old'])).toBeUndefined();
+    expect(await driver.get('SELECT id FROM webhook_deliveries WHERE delivery_id = ?', ['del_recent'])).toBeDefined();
+    expect(await driver.get('SELECT id FROM webhook_deliveries WHERE delivery_id = ?', ['del_proc_old'])).toBeDefined();
+    expect(await driver.get('SELECT id FROM webhook_deliveries WHERE delivery_id = ?', ['del_new'])).toBeDefined();
+  });
 });

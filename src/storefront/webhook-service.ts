@@ -16,6 +16,13 @@ export interface WebhookDeliveryResult {
   deliveryId: string;
 }
 
+/**
+ * How long rejected-delivery audit rows are kept. Rejected rows are never
+ * dedup markers, so expiring them cannot resurrect a processed delivery; the
+ * window only bounds audit growth from bad-signature spam.
+ */
+const REJECTED_RETENTION_DAYS = 30;
+
 export interface HandleDeliveryInput {
   provider: string;
   secret: string;
@@ -117,6 +124,12 @@ export class WebhookService {
    * Audit a rejected delivery. The (provider, delivery_id) unique key means a
    * repeat bad-signature attempt cannot be recorded twice — the first row is
    * kept and the duplicate insert is simply skipped.
+   *
+   * Rejected rows are an audit trail, not dedup markers, so they are pruned
+   * after the retention window. Without a bound an attacker could grow the
+   * table indefinitely with one bad-signature request per unique deliveryId.
+   * Only `status = 'rejected'` rows are eligible: processed payloads are
+   * never touched.
    */
   private async recordRejected(provider: string, deliveryId: string, paymentId: string | null, raw: string): Promise<void> {
     try {
@@ -126,9 +139,19 @@ export class WebhookService {
         [newId('whk'), provider, deliveryId, paymentId, 'rejected', raw, nowIso()],
       );
     } catch (error) {
-      if (isUniqueViolation(error)) return;
-      throw error;
+      if (!isUniqueViolation(error)) throw error;
     }
+    await this.pruneRejected(provider);
+  }
+
+  /** Drop rejected audit rows older than the retention window (idempotent). */
+  private async pruneRejected(provider: string): Promise<void> {
+    const cutoff = new Date(Date.now() - REJECTED_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await this.driver.run(
+      `DELETE FROM webhook_deliveries
+       WHERE provider = ? AND status = 'rejected' AND created_at < ?`,
+      [provider, cutoff],
+    );
   }
 
   /**
