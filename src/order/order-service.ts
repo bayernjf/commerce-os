@@ -124,11 +124,21 @@ export class OrderService {
     return this.mapOrder(row, lineRows);
   }
 
-  /** Resolve an order by its external reference (storefront: sf-{cartId}). */
-  async getOrderByExternalId(externalOrderId: string): Promise<Order> {
-    const row = await this.driver.get<Record<string, unknown>>('SELECT id FROM orders WHERE external_order_id = ?', [externalOrderId]);
+  /**
+   * Resolve an order by its external reference within one channel
+   * (storefront: sf-{cartId}). Orders are unique on
+   * (channel, external_order_id), so the lookup must carry the channel too.
+   */
+  async getOrderByExternalId(channel: string, externalOrderId: string): Promise<Order> {
+    const row = await this.driver.get<Record<string, unknown>>(
+      'SELECT id FROM orders WHERE channel = ? AND external_order_id = ?',
+      [channel, externalOrderId],
+    );
     if (!row) {
-      throw new CommerceError('NOT_FOUND', `order not found for external ref: ${externalOrderId}`, false, { externalOrderId });
+      throw new CommerceError('NOT_FOUND', `order not found for external ref: ${channel}/${externalOrderId}`, false, {
+        channel,
+        externalOrderId,
+      });
     }
     return this.getOrder(String(row.id));
   }

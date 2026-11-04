@@ -37,4 +37,27 @@ describe('order center (T-M3-05)', () => {
   it('unknown channel account fails closed', async () => {
     await expect(h.services.orders.importFromChannel('acc_missing')).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
+
+  it('resolves external ids inside the requested channel only (P3-1)', async () => {
+    const now = new Date().toISOString();
+    // Same external reference under two channels: orders are unique on
+    // (channel, external_order_id), so a channel-less lookup could return the
+    // wrong tenant's order.
+    await h.driver.run(
+      `INSERT INTO orders (id, channel, external_order_id, channel_account_id, status, total_amount, currency, buyer_ref, created_at, imported_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['ord-sf-dup', 'storefront', 'sf-dup-1', null, 'paid', 19.99, 'CNY', null, now, now],
+    );
+    await h.driver.run(
+      `INSERT INTO orders (id, channel, external_order_id, channel_account_id, status, total_amount, currency, buyer_ref, created_at, imported_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ['ord-dy-dup', 'sandbox-douyin', 'sf-dup-1', accountId, 'paid', 12.99, 'CNY', null, now, now],
+    );
+
+    expect((await h.services.orders.getOrderByExternalId('storefront', 'sf-dup-1')).id).toBe('ord-sf-dup');
+    expect((await h.services.orders.getOrderByExternalId('sandbox-douyin', 'sf-dup-1')).id).toBe('ord-dy-dup');
+    await expect(h.services.orders.getOrderByExternalId('douyin', 'sf-dup-1')).rejects.toMatchObject({
+      code: 'NOT_FOUND',
+    });
+  });
 });

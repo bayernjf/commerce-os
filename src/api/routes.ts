@@ -72,11 +72,11 @@ export function registerHttpRoutes(
   // Order status + refunds for the shopper, guarded by the cart token
   // (storefront orders carry external ref sf-{cartId}).
   app.get('/api/v1/storefront/carts/:id/order', async (c) => {
-    const order = await services.orders.getOrderByExternalId(`sf-${c.req.param('id')}`);
+    const order = await services.orders.getOrderByExternalId('storefront', `sf-${c.req.param('id')}`);
     return c.json({ order });
   });
   app.get('/api/v1/storefront/carts/:id/refunds', async (c) => {
-    const order = await services.orders.getOrderByExternalId(`sf-${c.req.param('id')}`);
+    const order = await services.orders.getOrderByExternalId('storefront', `sf-${c.req.param('id')}`);
     const refunds = await services.aftersales.listRefundsForOrder(order.id);
     return c.json({ refunds });
   });
@@ -84,7 +84,7 @@ export function registerHttpRoutes(
     const body = (await c.req.json()) as { reason: string; orderItemId: string; qty?: number };
     if (!body.reason?.trim()) throw new CommerceError('VALIDATION_FAILED', 'refund.reason is required');
     if (!body.orderItemId?.trim()) throw new CommerceError('VALIDATION_FAILED', 'orderItemId is required');
-    const order = await services.orders.getOrderByExternalId(`sf-${c.req.param('id')}`);
+    const order = await services.orders.getOrderByExternalId('storefront', `sf-${c.req.param('id')}`);
     const refund = await services.aftersales.requestRefund(order.id, {
       lines: [{ orderItemId: body.orderItemId, ...(body.qty ? { qty: body.qty } : {}) }],
       reason: body.reason,
