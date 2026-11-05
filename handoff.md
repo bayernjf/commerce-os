@@ -76,7 +76,7 @@
 
 ## Next（M6 外部条件 + M7 + storefront）
 
-- [ ] **storefront SF-09~SF-14（2026-10-28 起）**：SF-01~08 已落地（迁移 003/004 + catalog/cart/checkout/webhook 服务 + payment port/registry + HTTP 层）；下一任务 SF-09 结算金额进 ZeusDecisionClient（D3 阈值挂起三态）。详见 `../bayjf/docs/tier0/Tier0-独立站双用任务拆解与推进评估.md` M1。
+- [x] ~~storefront SF-09~SF-14~~ **已全部完成（2026-10-28，见上 Current state）**：SF-09 D3 结算挂起三态、SF-10 前端子工程 `front/`、SF-11 CORS + CartIsland、SF-12 订单/退款入口、SF-13 GATE-S1（脚本化 e2e）、SF-14 ops-console 接线均落地；本条不再是待办（2026-11-05 复核）。
 - [ ] M6 现网（T-M6-03，外部）：准备 Vercel/Cloudflare/云凭据 + 域名/TLS，按生产工件或 agent-dev 发布编排真做现网部署，跑 healthz/readyz
 - [ ] T-M6-04（外部）：抖店资质/店铺到位后，新增 live `douyin` 适配器（实现 ChannelAdapter 五方法 + 凭据后端），完成 1 次真实 upsert+拉单
 - [ ] T-M6-05 现网冒烟（外部）：含 D2/D3 真实审批一次，补 GATE-M6 证据后过门
