@@ -44,6 +44,19 @@ describe('sqlite migration runner', () => {
     await driver.close();
   });
 
+  it('re-runs sqlite 007 twice without error (idempotent DDL)', async () => {
+    const driver = new SqliteDriver(':memory:');
+    await migrateUp(driver);
+    const sql = readFileSync(join(sqliteDir, '007_checkout_integrity.sql'), 'utf8');
+    await driver.exec(sql);
+    await driver.exec(sql);
+    const columns = await driver.all<{ name: string }>('PRAGMA table_info(checkouts)');
+    expect(columns.filter((column) => column.name === 'provider')).toHaveLength(1);
+    const indexes = await driver.all<{ name: string }>('PRAGMA index_list(payments)');
+    expect(indexes.some((index) => index.name === 'payments_checkout_id_uniq')).toBe(true);
+    await driver.close();
+  });
+
   it('records a sha256 checksum for every applied migration', async () => {
     const driver = new SqliteDriver(':memory:');
     await migrateUp(driver);
