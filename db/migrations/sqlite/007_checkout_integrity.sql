@@ -4,5 +4,5 @@
 -- hardcoding 'fake'), and payments gets one row per checkout so a raced
 -- double-finalize fails on the unique index before the provider is charged.
 
-ALTER TABLE checkouts ADD COLUMN provider TEXT NOT NULL DEFAULT 'fake';
+ALTER TABLE checkouts ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'fake';
 CREATE UNIQUE INDEX IF NOT EXISTS payments_checkout_id_uniq ON payments (checkout_id);
