@@ -34,8 +34,28 @@ export class SqliteDriver implements StorageDriver {
     return { changes: Number(result.changes ?? 0) };
   }
 
+  /**
+   * SQLite rejects `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (Postgres
+   * accepts it). Emulate the guard by dropping such statements when the
+   * column already exists, so sqlite/007 can stay textually aligned with
+   * postgres/007 and a re-run of the same file is a no-op.
+   */
+  private rewriteAddColumnGuards(sql: string): string {
+    return sql.replace(
+      /ALTER\s+TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+([A-Za-z_][A-Za-z0-9_]*)([^;]*);/gi,
+      (_match, table: string, column: string, tail: string) => {
+        const columns = this.db.prepare(`PRAGMA table_info("${table}")`).all() as {
+          name: string;
+        }[];
+        return columns.some((c) => c.name === column)
+          ? ''
+          : `ALTER TABLE ${table} ADD COLUMN ${column}${tail};`;
+      },
+    );
+  }
+
   async exec(sql: string): Promise<void> {
-    this.db.exec(sql);
+    this.db.exec(this.rewriteAddColumnGuards(sql));
   }
 
   async transaction<T>(work: () => Promise<T>): Promise<T> {
