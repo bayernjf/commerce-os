@@ -14,7 +14,10 @@ export type CommerceErrorCode =
   | 'CONTENT_UNAVAILABLE'
   | 'NOT_IMPLEMENTED_PLACEHOLDER'
   | 'WEBHOOK_SIGNATURE_INVALID'
-  | 'CONFLICT';
+  | 'CONFLICT'
+  | 'VLM_NO_IMAGE'
+  | 'VLM_BAD_PAYLOAD'
+  | 'VLM_UNAVAILABLE';
 
 export class CommerceError extends Error {
   readonly code: CommerceErrorCode;
@@ -52,6 +55,11 @@ export function httpStatusFor(code: CommerceErrorCode): number {
       return 503;
     case 'NOT_IMPLEMENTED_PLACEHOLDER':
       return 501;
+    case 'VLM_NO_IMAGE':
+    case 'VLM_BAD_PAYLOAD':
+      return 400;
+    case 'VLM_UNAVAILABLE':
+      return 503;
   }
 }
 

@@ -8,6 +8,7 @@ import { migrateUp } from './storage/migrate.js';
 import { ZeusDecisionClient } from './decision/zeus-decision-client.js';
 import { LoomContentClient } from './content/loom-content-client.js';
 import type { ContentClient } from './content/types.js';
+import { createOnlineListingIngest } from './publishing/vlm-listing-ingest.js';
 import { createAlertReporter } from './observability/alerts.js';
 import { logger } from './observability/logger.js';
 import { assertFailClosedBoot } from './util/boot.js';
@@ -66,7 +67,19 @@ async function main(): Promise<void> {
         ...(process.env.LOOM_ACTOR_ID ? { actorId: process.env.LOOM_ACTOR_ID } : {}),
       })
     : undefined;
-  const services = createServices(driver, decisions, undefined, content);
+
+  // VLM listing ingest (T-M9-01/J1): opt-in via COMMERCE_VLM_ENABLED, and only
+  // when model-hub URL + token are present. Otherwise online ingest fails
+  // closed and the offline stub remains the default in createServices.
+  const ingest = process.env.COMMERCE_VLM_ENABLED === 'true'
+    ? createOnlineListingIngest({
+        enabled: true,
+        ...(process.env.MODEL_HUB_URL ? { hubUrl: process.env.MODEL_HUB_URL } : {}),
+        ...(process.env.MODEL_HUB_TOKEN ? { hubToken: process.env.MODEL_HUB_TOKEN } : {}),
+        ...(process.env.MODEL_HUB_TEXT_ALIAS ? { textAlias: process.env.MODEL_HUB_TEXT_ALIAS } : {}),
+      })
+    : undefined;
+  const services = createServices(driver, decisions, undefined, content, ingest);
 
   const webhookSecrets: Record<string, string> = {};
   if (process.env.COMMERCE_WEBHOOK_FAKE_SECRET) {

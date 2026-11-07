@@ -28,6 +28,9 @@ jobs:
           # build fails with TS2307.
           git clone --depth 1 https://github.com/${{ github.repository_owner }}/model-hub.git "$GITHUB_WORKSPACE/../model-hub"
           npm ci --prefix "$GITHUB_WORKSPACE/../model-hub" --no-audit --no-fund
+          # commerce-os imports @model-hub/model-kit directly (file: dep); its
+          # package exports point at dist/, so build the kit before install.
+          npm run build --prefix "$GITHUB_WORKSPACE/../model-hub/packages/model-kit"
           cd "$ZEUS_DIR"
           npm ci
           npm run build
