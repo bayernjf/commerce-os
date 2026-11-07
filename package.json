@@ -25,7 +25,8 @@
   "dependencies": {
     "@hono/node-server": "^1.13.0",
     "hono": "^4.13.13",
-    "zeus-client": "file:../zeus/packages/zeus-client"
+    "zeus-client": "file:../zeus/packages/zeus-client",
+    "@model-hub/model-kit": "file:../model-hub/packages/model-kit"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
