@@ -13,7 +13,10 @@ services:
         base: docker-image://node:22-slim
         # Cross-repo typed decision client (file: dependency in package.json).
         zeusclient: ../zeus/packages/zeus-client
-    image: commerce-os:latest
+    # Tag hook for rolling back code, not just data. Releasing means
+    # `docker tag commerce-os:latest commerce-os:<stamp>` first; a rollback sets
+    # COMMERCE_IMAGE_TAG to that stamp and reruns `docker compose up -d`.
+    image: commerce-os:${COMMERCE_IMAGE_TAG:-latest}
     env_file: .env
     environment:
       COMMERCE_DB_DRIVER: sqlite
