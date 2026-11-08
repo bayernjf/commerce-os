@@ -48,8 +48,29 @@ node --experimental-sqlite scripts/restore-commerce.mjs \
 
 ## 4. 回滚代码靠镜像 tag
 
-发布前先 `docker tag commerce-os:latest commerce-os:<stamp>` 保存当版；回滚时
-`COMMERCE_IMAGE_TAG=<stamp> docker compose up -d`。只保留 `latest` 时数据能回、代码回不去。
+发布前先 `docker tag commerce-os:latest commerce-os:<stamp>` 保存当版，**保留 3 个**
+（当前 + 2 个上一版）；回滚时：
+
+```bash
+COMMERCE_IMAGE_TAG=<stamp> docker compose up -d
+```
+
+`COMMERCE_IMAGE_TAG` 默认是 `latest`，这与现有部署方式一致，但**默认值本身不是
+回滚锚点**：任何一次重建都会覆盖 `latest`，不带环境变量的 `docker compose up -d`
+只是部署“最后一次构建”，无法回答“线上现在是哪一版”。改成强制显式版本
+（`${COMMERCE_IMAGE_TAG:?}`）的代价是：所有既有部署脚本、cron 和手工命令都必须
+先设置该变量，否则 compose 直接启动失败；因此本次不改默认行为，只在发布流程里
+要求显式传入 stamp。
+
+**这条路径会在什么情况下失效**
+
+- tag 只在本地 Docker daemon：换机、`docker image prune` 或清理构建缓存后不存在。
+  本仓没有 registry 推送流程，不能当作跨机回滚方案。
+- 只留 `latest`、不额外打 tag：数据能回、代码回不去。
+- 跨机保留需 `docker save commerce-os:<stamp> | gzip` 异地保存，目标机
+  `docker load`；仍不等价于 registry 的不可变 digest。
+
+镜像 tag 只回代码；数据回滚见 §3 的 `restore-commerce.mjs`。
 
 ## 5. 演练记录（2026-11-08）
 
