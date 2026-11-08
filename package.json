@@ -18,6 +18,8 @@
     "migrate:pg:up": "node scripts/migrate.mjs up --driver postgres",
     "migrate:pg:status": "node scripts/migrate.mjs status --driver postgres",
     "check:migrations": "bash scripts/check-migrations.sh",
+    "backup:state": "node --experimental-sqlite scripts/backup-commerce.mjs",
+    "restore:state": "node --experimental-sqlite scripts/restore-commerce.mjs",
     "e2e:storefront": "bash scripts/e2e-storefront.sh",
     "e2e:storefront:console": "bash scripts/e2e-storefront.sh --with-console",
     "lint:secrets": "bash scripts/scan-secrets.sh"

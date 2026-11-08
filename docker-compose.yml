@@ -13,7 +13,10 @@ services:
         base: docker-image://node:22-slim
         # Cross-repo typed decision client (file: dependency in package.json).
         zeusclient: ../zeus/packages/zeus-client
-    image: commerce-os:latest
+    # Tag hook for rolling back code, not just data. Releasing means
+    # `docker tag commerce-os:latest commerce-os:<stamp>` first; a rollback sets
+    # COMMERCE_IMAGE_TAG to that stamp and reruns `docker compose up -d`.
+    image: commerce-os:${COMMERCE_IMAGE_TAG:-latest}
     env_file: .env
     environment:
       COMMERCE_DB_DRIVER: sqlite
@@ -42,6 +45,36 @@ services:
       resources:
         limits:
           memory: 512M
+
+  # State snapshots. Backs up the single SQLite file with VACUUM INTO, verifies
+  # integrity and per-table counts, writes a manifest and prunes to N snapshots.
+  # The data volume is mounted read-only on purpose: a backup must never write
+  # to the thing it is protecting.
+  #
+  # The loop keeps running when a snapshot fails (no restart storms, no silent
+  # stop); the failure stays in the container log and `|| true` only affects the
+  # exit code, not the output.
+  backup:
+    image: node:22-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
+    depends_on:
+      - commerce-os
+    volumes:
+      - commerce-data:/data:ro
+      - ./backups:/backups
+      - ./scripts/backup-loop.sh:/scripts/backup-loop.sh:ro
+      - ./scripts/backup-commerce.mjs:/scripts/backup-commerce.mjs:ro
+    environment:
+      COMMERCE_SQLITE_PATH: /data/commerce-os.db
+      COMMERCE_BACKUP_DIR: /backups
+      COMMERCE_BACKUP_INTERVAL_SECONDS: ${COMMERCE_BACKUP_INTERVAL_SECONDS:-86400}
+      COMMERCE_BACKUP_KEEP: ${COMMERCE_BACKUP_KEEP:-7}
+    entrypoint: ["sh", "/scripts/backup-loop.sh"]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
 volumes:
   commerce-data:

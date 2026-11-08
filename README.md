@@ -58,7 +58,11 @@ COMMERCE_API_TOKEN=dev-token npm start   # http://127.0.0.1:8787 （node --exper
 `Authorization: Bearer <token>`；前台公开路由（catalog/cart/webhook）由
 各自的 cart token 与 webhook HMAC 保护。
 
-环境变量见 `.env.example`。生产 PostgreSQL：`npm install pg` 后 `COMMERCE_DB_DRIVER=postgres DATABASE_URL=... npm run migrate:pg:up`。
+环境变量见 `.env.example`。**本地 `npm start` 不会读取 `.env`**：服务只认进程环境，
+请用前置赋值（如上）或 `export`；只有容器路径由 compose 的 `env_file: .env` 注入。
+`npm run migrate:up` 同样只读进程环境，不会加载 `.env`。
+
+生产 PostgreSQL：`npm install pg` 后 `COMMERCE_DB_DRIVER=postgres DATABASE_URL=... npm run migrate:pg:up`。
 
 ## HTTP 摘要（/api/v1）
 
