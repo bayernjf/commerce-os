@@ -113,6 +113,14 @@ function main() {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   const actual = verify(snapshotDb);
 
+  // A file that verifies but has no orders table is not a commerce-os database
+  // (unmigrated or wrong file). Restoring it would serve an empty schema.
+  if (actual.orders === undefined) {
+    throw new RestoreError(
+      `snapshot has no orders table: ${args.snapshot} is not a migrated commerce-os database`,
+    );
+  }
+
   for (const [table, expected] of Object.entries(manifest.tables ?? {})) {
     const got = actual[table];
     if (got !== expected) {
