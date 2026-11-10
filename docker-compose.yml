@@ -13,6 +13,9 @@ services:
         base: docker-image://node:22-slim
         # Cross-repo typed decision client (file: dependency in package.json).
         zeusclient: ../zeus/packages/zeus-client
+        # Second cross-repo file: dependency; without it the build fails with
+        # "Cannot find module '@model-hub/model-kit'".
+        modelkit: ../model-hub/packages/model-kit
     # Tag hook for rolling back code, not just data. Releasing means
     # `docker tag commerce-os:latest commerce-os:<stamp>` first; a rollback sets
     # COMMERCE_IMAGE_TAG to that stamp and reruns `docker compose up -d`.

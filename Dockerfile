@@ -14,6 +14,8 @@ WORKDIR /app
 
 # Place the client where the package.json "file:../zeus/..." path resolves.
 COPY --from=zeusclient ./ /zeus/packages/zeus-client/
+# Same treatment for the other cross-repo file: dependency.
+COPY --from=modelkit ./ /model-hub/packages/model-kit/
 
 COPY package.json package-lock.json* ./
 RUN npm install
@@ -28,6 +30,7 @@ FROM base
 WORKDIR /app
 
 COPY --from=zeusclient ./ /zeus/packages/zeus-client/
+COPY --from=modelkit ./ /model-hub/packages/model-kit/
 
 # node:sqlite needs the experimental flag at runtime; no native deps are
 # required. Postgres support requires the optional `pg` package in the
