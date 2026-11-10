@@ -1,0 +1,9 @@
+# Local-only overrides. The committed compose file reads .env, and the service
+# refuses to start without COMMERCE_API_TOKEN (auth is fail-closed). This
+# supplies a throwaway value so the stack runs on this machine.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+services:
+  commerce-os:
+    environment:
+      COMMERCE_API_TOKEN: local-dev-only-not-a-real-token
