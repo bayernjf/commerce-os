@@ -1,0 +1,25 @@
+# Local-only overrides. The committed compose file reads .env, and the service
+# refuses to start without COMMERCE_API_TOKEN (auth is fail-closed). This
+# supplies a throwaway value so the stack runs on this machine, and joins the
+# shared Tier 0 network so decisions reach the zeus kernel.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+networks:
+  tier0-net:
+    external: true
+
+services:
+  commerce-os:
+    networks:
+      - default
+      - tier0-net
+    environment:
+      COMMERCE_API_TOKEN: local-dev-only-not-a-real-token
+      # The repo .env points at 127.0.0.1:8080, which inside a container is the
+      # container itself and nothing listens there. The kernel lives on the
+      # shared network under the service name "zeus".
+      ZEUS_BASE_URL: http://zeus:8787
+      # Must match ZEUS_INTERNAL_TOKEN on the kernel. Throwaway local value.
+      ZEUS_INTERNAL_TOKEN: ${ZEUS_INTERNAL_TOKEN:-local-dev-internal-token-16chars}
+      MODEL_HUB_URL: http://model-hub:8791
+      MODEL_HUB_TOKEN: ${MODEL_HUB_TOKEN:-}
