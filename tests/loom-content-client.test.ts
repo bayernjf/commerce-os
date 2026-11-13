@@ -57,4 +57,19 @@ describe('loom content-base client (T-M4-03) over real HTTP', () => {
       bad.request({ productId: 's', channel: 'douyin', contentType: 'qa', inputs: {} }),
     ).rejects.toMatchObject({ code: 'CONTENT_UNAVAILABLE' });
   });
+
+  it('sends the agent key as a Bearer authorization header', async () => {
+    const keyed = new LoomContentClient({
+      baseUrl: loom.url,
+      actorId: 'tester',
+      agentKey: 'sk-test',
+    });
+    await keyed.request({ productId: 's', channel: 'douyin', contentType: 'qa', inputs: {} });
+    expect(loom.lastAuthorization).toBe('Bearer sk-test');
+  });
+
+  it('omits the authorization header when no agent key is configured', async () => {
+    await client.request({ productId: 's', channel: 'douyin', contentType: 'qa', inputs: {} });
+    expect(loom.lastAuthorization).toBeNull();
+  });
 });
