@@ -86,7 +86,14 @@ if [ "$WITH_CONSOLE" = "--with-console" ]; then
   [ -f "$CONSOLE_DIR/dist/server/entry.mjs" ] || fail "console dist missing; run npm run build in $CONSOLE_DIR"
   (
     cd "$CONSOLE_DIR"
-    node --experimental-sqlite dist/server/entry.mjs > "$DATA_DIR/console.log" 2>&1 &
+    # ops-console is fail-closed: it reads secrets only from the process env and
+    # does not auto-load .env in standalone mode. Source its .env so the required
+    # secrets and upstream URLs are present, then pin the listen port (the
+    # standalone adapter reads PORT, not OPS_PORT).
+    set -a
+    [ -f .env ] && source .env
+    set +a
+    PORT="$CONSOLE_PORT" node --experimental-sqlite dist/server/entry.mjs > "$DATA_DIR/console.log" 2>&1 &
     echo $! > "$DATA_DIR/console.pid"
   )
   CONSOLE_PID="$(cat "$DATA_DIR/console.pid")"
