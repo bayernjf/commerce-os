@@ -65,6 +65,7 @@ async function main(): Promise<void> {
     ? new LoomContentClient({
         baseUrl: loomBaseUrl,
         ...(process.env.LOOM_ACTOR_ID ? { actorId: process.env.LOOM_ACTOR_ID } : {}),
+        ...(process.env.LOOM_AGENT_KEY ? { agentKey: process.env.LOOM_AGENT_KEY } : {}),
       })
     : undefined;
 

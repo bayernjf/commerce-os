@@ -4,6 +4,7 @@ import type { ContentCandidate, ContentClient, ContentRequest } from './types.js
 export interface LoomContentClientOptions {
   baseUrl: string;
   actorId?: string;
+  agentKey?: string;
   timeoutMs?: number;
 }
 
@@ -28,11 +29,13 @@ export class LoomContentClient implements ContentClient {
   readonly source = 'content-base' as const;
   private readonly baseUrl: string;
   private readonly actorId: string;
+  private readonly agentKey: string | undefined;
   private readonly timeoutMs: number;
 
   constructor(options: LoomContentClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.actorId = options.actorId ?? 'commerce-os';
+    this.agentKey = options.agentKey;
     this.timeoutMs = options.timeoutMs ?? 60000;
   }
 
@@ -95,7 +98,10 @@ export class LoomContentClient implements ContentClient {
     try {
       res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          ...(this.agentKey ? { authorization: `Bearer ${this.agentKey}` } : {}),
+        },
         body: JSON.stringify(payload),
         signal: ctrl.signal,
       });

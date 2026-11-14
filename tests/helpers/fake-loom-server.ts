@@ -25,6 +25,8 @@ export class FakeLoomServer {
   url = '';
   /** When set, /requests returns this status once (error-path testing). */
   failRequestsWith = 0;
+  /** Last Authorization header seen (for agent-key auth assertions). */
+  lastAuthorization: string | null = null;
 
   async start(): Promise<string> {
     const server = createServer((req, res) => this.handle(req, res));
@@ -53,6 +55,7 @@ export class FakeLoomServer {
 
   private async handle(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> {
     const url = req.url ?? '';
+    this.lastAuthorization = req.headers.authorization ?? null;
 
     if (req.method === 'POST' && url === '/api/v1/content/requests') {
       if (this.failRequestsWith) {

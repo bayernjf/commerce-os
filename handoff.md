@@ -1,5 +1,11 @@
 # commerce-os handoff
 
+> **2026-11-13 补登：CONTENT-BASE 链路已通过 loom + ark-code-latest 跑通 HTTP 端到端。**
+>
+> - **结论**：commerce-os 的内容生成链路（`CONTENT-BASE` 场景，经 loom `LLMContentProducer`）已在 HTTP 层真实验证闭环——Agent Key 认证 `POST /api/v1/content/requests` 返回 **201 + `evidence_refs=['llm:ark-code-latest']` + status=`pending_review`**，真实产出电商详情文案。
+> - **前提**：loom 已接 model-hub（loom 项目 + ark-code-latest + token，见 loom/handoff.md）；`CONTENT-BASE` 场景 text 模态解析到 ark-code-latest（非 agnes 兜底、非 synthetic）。
+> - **说明**：本次为链路连通性验证，成稿质量仍是 ark-code-latest（代码/推理向）的"结构化偏技术腔"水准；产出合格营销文案待 SSO 重登后切 doubao-seed-1-6。
+
 > **2026-11-06 补登：dev → main 已于 2026-11-05 经 PR #7 合并（合并前 CI 全绿）；实测 origin/main 与 origin/dev 内容完全一致（git diff 为空）。**
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
