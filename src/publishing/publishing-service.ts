@@ -16,6 +16,12 @@ export interface ListingSubmission {
   status: 'awaiting_approval' | 'listed';
   externalProductId?: string;
   externalContentId?: string;
+  /**
+   * Evidence refs produced by listing ingest (T-M9-01/J1). Kept out of
+   * ContentCandidate on purpose: loom owns the candidate's evidence, while
+   * these point back at the source images/URL the extraction came from.
+   */
+  ingestEvidenceRefs?: string[];
 }
 
 /**
@@ -58,6 +64,7 @@ export class PublishingService {
     let title = product.title;
     let sellingPoints = input.sellingPoints ?? [];
     let description: string | undefined;
+    let ingestEvidenceRefs: string[] | undefined;
     if (input.ingestSource !== undefined && this.ingest !== undefined) {
       const ingested = await this.ingest.ingest({
         productId: product.id,
@@ -68,6 +75,21 @@ export class PublishingService {
       if (ingested.title.trim().length > 0) title = ingested.title;
       if (ingested.sellingPoints.length > 0) sellingPoints = ingested.sellingPoints;
       if (ingested.description.trim().length > 0) description = ingested.description;
+      if (ingested.evidenceRefs.length > 0) {
+        ingestEvidenceRefs = ingested.evidenceRefs;
+        // Persist the extraction provenance so the evidence survives the
+        // content candidate (loom only knows its own llm evidence refs).
+        await this.events.record({
+          eventType: 'listing.ingested',
+          refType: 'product',
+          refId: product.id,
+          payload: {
+            channel: account.channel,
+            source: input.ingestSource.url !== undefined ? 'url' : 'image',
+            evidenceRefs: ingested.evidenceRefs,
+          },
+        });
+      }
     }
 
     // 2. Content candidate (stub in M3, loom content-base in M4).
@@ -98,7 +120,7 @@ export class PublishingService {
     });
 
     if (decision.status === 'decided') {
-      return this.executeListing(product.id, account.id, candidate.id, decision.decisionId);
+      return this.executeListing(product.id, account.id, candidate.id, decision.decisionId, ingestEvidenceRefs);
     }
 
     return {
@@ -108,6 +130,7 @@ export class PublishingService {
       decisionId: decision.decisionId,
       grade: decision.grade,
       status: 'awaiting_approval',
+      ...(ingestEvidenceRefs !== undefined ? { ingestEvidenceRefs } : {}),
     };
   }
 
@@ -121,6 +144,16 @@ export class PublishingService {
     const channelAccountId = String(event.payload.channelAccountId);
     const contentId = String(event.payload.contentId);
 
+    // Recover the ingest provenance recorded at submission time so the
+    // approved listing keeps the same evidence trail.
+    const ingestedEvents = await this.events.list({ eventType: 'listing.ingested', refId: productId });
+    const lastIngested = ingestedEvents.at(-1);
+    const rawEvidence = lastIngested?.payload.evidenceRefs;
+    const ingestEvidenceRefs =
+      Array.isArray(rawEvidence) && rawEvidence.every((r) => typeof r === 'string')
+        ? (rawEvidence as string[])
+        : undefined;
+
     const decision = await this.decisions.approve(decisionId, approver, comment);
     if (decision.status === 'rejected') {
       throw new CommerceError('CONFLICT', `listing decision was rejected: ${decisionId}`, false, { decisionId });
@@ -132,7 +165,7 @@ export class PublishingService {
         status: decision.status,
       });
     }
-    return this.executeListing(productId, channelAccountId, contentId, decisionId);
+    return this.executeListing(productId, channelAccountId, contentId, decisionId, ingestEvidenceRefs);
   }
 
   async rejectListing(decisionId: string, approver: string, comment?: string): Promise<{ decisionId: string; status: 'rejected' }> {
@@ -146,7 +179,13 @@ export class PublishingService {
     return { decisionId, status: 'rejected' };
   }
 
-  private async executeListing(productId: string, channelAccountId: string, contentId: string, decisionId: string): Promise<ListingSubmission> {
+  private async executeListing(
+    productId: string,
+    channelAccountId: string,
+    contentId: string,
+    decisionId: string,
+    ingestEvidenceRefs?: string[],
+  ): Promise<ListingSubmission> {
     const product = await this.products.getProduct(productId);
     const account = await this.accounts.get(channelAccountId);
     const adapter = this.registry.get(account.channel);
@@ -191,6 +230,7 @@ export class PublishingService {
       status: 'listed',
       externalProductId: productRef.externalProductId,
       externalContentId: published.externalContentId,
+      ...(ingestEvidenceRefs !== undefined ? { ingestEvidenceRefs } : {}),
     };
   }
 }

@@ -54,6 +54,29 @@ describe('PublishingService ingestSource (T-M9-01/J1)', () => {
     // OfflineListingIngest overwrites the title and selling points.
     expect(submitted.content.body.title).toContain('商品');
     expect(submitted.content.body.text).toContain('离线 ingest 提取');
+    // Provenance survives the content candidate: returned and evented.
+    expect(submitted.ingestEvidenceRefs).toEqual(['https://img.example.com/p1.jpg']);
+    const ingested = await h.services.events.list({ eventType: 'listing.ingested' });
+    expect(ingested).toHaveLength(1);
+    expect(ingested[0]?.payload.evidenceRefs).toEqual(['https://img.example.com/p1.jpg']);
+  });
+
+  it('keeps the ingest provenance on the approved listing', async () => {
+    const account = await h.services.accounts.create({ channel: 'sandbox-douyin', displayName: 'shop' });
+    const product = await h.services.products.createProduct({
+      title: '原始标题',
+      channelAccountId: account.id,
+      skus: [{ skuCode: 'SKU-2', price: 100 }],
+    });
+    const submitted = await h.services.publishing.submitListing({
+      productId: product.id,
+      channelAccountId: account.id,
+      ingestSource: { url: 'https://shop.example.com/p/2' },
+    });
+    expect(submitted.status).toBe('awaiting_approval');
+    const listed = await h.services.publishing.approveListing(submitted.decisionId, 'ops');
+    expect(listed.status).toBe('listed');
+    expect(listed.ingestEvidenceRefs).toEqual(['https://shop.example.com/p/2']);
   });
 
   it('keeps caller sellingPoints when no ingestSource is given', async () => {
