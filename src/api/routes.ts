@@ -254,12 +254,28 @@ export function registerHttpRoutes(
   // ---- Listings (content + publish) ------------------------------------
   app.post('/api/v1/listings', async (c) => {
     const body = await c.req.json();
+    // T-M9-01/J1: image/URL listing extraction is opt-in per request. Empty or
+    // non-string entries are dropped so a malformed body never reaches the
+    // ingest port; when nothing usable remains the request stays text-only.
+    const imageUrls: string[] = Array.isArray(body.imageUrls)
+      ? body.imageUrls.filter((u: unknown): u is string => typeof u === 'string' && u.trim() !== '')
+      : [];
+    const pageUrl =
+      typeof body.url === 'string' && body.url.trim() !== '' ? body.url : undefined;
+    const ingestSource =
+      imageUrls.length > 0 || pageUrl !== undefined
+        ? {
+            ...(imageUrls.length > 0 ? { imageUrls } : {}),
+            ...(pageUrl !== undefined ? { url: pageUrl } : {}),
+          }
+        : undefined;
     const submission = await services.publishing.submitListing({
       productId: body.productId,
       channelAccountId: body.channelAccountId,
       contentType: body.contentType,
       sellingPoints: body.sellingPoints,
       constraints: body.constraints,
+      ...(ingestSource !== undefined ? { ingestSource } : {}),
     });
     const status = (submission.status === 'awaiting_approval' ? 423 : 201) as 423 | 201;
     return c.json({ submission }, status);
