@@ -32,10 +32,14 @@ export function createApp(deps: CommerceAppDeps): Hono {
 
   // Browser cross-origin access for the storefront islands (cart/checkout).
   // Origin allow-list: explicit env in production, local dev default here.
+  // A lone `*` must stay a wildcard; Hono otherwise treats it as one literal
+  // origin and emits no Access-Control-Allow-Origin header.
+  const configuredOrigins = deps.allowedOrigins?.length ? deps.allowedOrigins : DEFAULT_ALLOWED_ORIGINS;
+  const origin = configuredOrigins.length === 1 && configuredOrigins[0] === '*' ? '*' : configuredOrigins;
   app.use(
     '/api/v1/*',
     cors({
-      origin: deps.allowedOrigins?.length ? deps.allowedOrigins : DEFAULT_ALLOWED_ORIGINS,
+      origin,
       allowMethods: ['GET', 'POST', 'OPTIONS'],
       allowHeaders: ['Content-Type', 'Authorization'],
     }),
