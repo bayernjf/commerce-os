@@ -14,7 +14,7 @@ describe('storefront order status + refunds (SF-12)', () => {
   });
   afterEach(async () => teardownHarness(h));
 
-  async function paidCart(price = 1999): Promise<{ cartId: string; token: string; orderItemId: string }> {
+  async function paidCart(price = 1999, qty = 1): Promise<{ cartId: string; token: string; orderItemId: string }> {
     const product = await h.services.products.createProduct({
       title: '订单页商品',
       skus: [{ skuCode: 'SKU-ORD-1', price, currency: 'CNY' }],
@@ -29,7 +29,7 @@ describe('storefront order status + refunds (SF-12)', () => {
     await app.request(`/api/v1/storefront/carts/${cartId}/items`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ productId: product.id, skuId: product.skus[0]?.id ?? '', qty: 1 }),
+      body: JSON.stringify({ productId: product.id, skuId: product.skus[0]?.id ?? '', qty }),
     });
     const co = await app.request(`/api/v1/storefront/carts/${cartId}/checkout`, {
       method: 'POST',
@@ -151,5 +151,33 @@ describe('storefront order status + refunds (SF-12)', () => {
     const { refunds } = (await listRes.json()) as { refunds: { id: string; status: string }[] };
     const entry = refunds.find((r) => r.id === refundId);
     expect(entry?.status).toBe('succeeded');
+
+    const orderRes = await app.request(`/api/v1/storefront/carts/${cartId}/order`, { headers });
+    const { order } = (await orderRes.json()) as { order: { status: string } };
+    expect(order.status).toBe('refunded');
+  });
+
+  it('keeps a partially refunded order in paid status', async () => {
+    const { cartId, token, orderItemId } = await paidCart(1999, 2);
+    const headers = { 'content-type': 'application/json', authorization: `Cart ${token}` };
+
+    const res = await app.request(`/api/v1/storefront/carts/${cartId}/refunds`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ reason: '退一件', orderItemId, qty: 1 }),
+    });
+    expect(res.status).toBe(423);
+    const { refund } = (await res.json()) as { refund: { id: string } };
+
+    const decision = await app.request(`/api/v1/refunds/${refund.id}/decision`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ verdict: 'approve', approver: 'owner' }),
+    });
+    expect(decision.status).toBe(200);
+
+    const orderRes = await app.request(`/api/v1/storefront/carts/${cartId}/order`, { headers });
+    const { order } = (await orderRes.json()) as { order: { status: string } };
+    expect(order.status).toBe('paid');
   });
 });

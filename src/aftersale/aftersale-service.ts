@@ -233,7 +233,31 @@ export class AftersaleService {
       decisionId,
       payload: { externalRefundId: result.externalRefundId, channel: result.channel },
     });
+    await this.markOrderRefundedIfFullyRefunded(order);
     return this.getRefund(refund.id);
+  }
+
+  /**
+   * A fully refunded order must leave the paid bucket. Only succeeded refunds
+   * count; pending D2 reservations are not money returned yet.
+   */
+  private async markOrderRefundedIfFullyRefunded(order: Awaited<ReturnType<OrderService['getOrder']>>): Promise<void> {
+    const rows = await this.driver.all<Record<string, unknown>>(
+      "SELECT lines_json FROM refunds WHERE order_id = ? AND status = 'succeeded'",
+      [order.id],
+    );
+    let refundedCents = 0;
+    for (const row of rows) {
+      try {
+        const lines = JSON.parse(String(row.lines_json)) as { amount?: number }[];
+        for (const line of lines) refundedCents += Math.round(Number(line.amount ?? 0) * 100);
+      } catch {
+        // A malformed historical row must not mark the order refunded.
+      }
+    }
+    if (refundedCents >= Math.round(order.totalAmount * 100)) {
+      await this.orders.setStatus(order.id, 'refunded');
+    }
   }
 
   async getRefund(id: string): Promise<Refund> {
