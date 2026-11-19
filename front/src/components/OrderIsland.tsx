@@ -99,10 +99,15 @@ export default function OrderIsland({ cartId, apiBase }: OrderIslandProps) {
         body: JSON.stringify({ reason: '客户申请退款', orderItemId: lineId }),
       });
       const body = (await res.json().catch(() => null)) as { refund?: Refund; error?: { message?: string } } | null;
+      if (body?.refund?.status === 'awaiting_approval') {
+        setNotice('退款申请已提交，等待审批（D2）');
+        await load();
+        return;
+      }
       if (!res.ok || !body?.refund) {
         throw new Error(body?.error?.message ?? `退款申请失败 (${res.status})`);
       }
-      setNotice(body.refund.status === 'awaiting_approval' ? '退款申请已提交，等待审批（D2）' : '退款申请已提交');
+      setNotice('退款申请已提交');
       await load();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : '退款申请失败');
