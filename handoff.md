@@ -1,5 +1,16 @@
 # commerce-os handoff
 
+## 待办登记（标准）
+
+> 本段是本产品唯一活跃待办入口；详细背景见下方原有章节。完成一项改 `[x]`，并在“最近变更 / Recently shipped”留证据。
+> 最近同步：2026-11-19
+
+- [ ] **M6 现网（T-M6-03，外部）** — 状态：blocked；下一步：准备 Vercel/Cloudflare/云凭据 + 域名/TLS，跑 healthz/readyz。
+- [ ] **T-M9-01 VLM / 开放平台凭据** — 状态：blocked；下一步：owner 提供模型 ID/key 与 API 凭据，注册真实 `ListingIngestPort`，打通 `ingestFromImage` / `ingestFromUrl`。
+- [ ] **T-M6-04 抖店 live 适配器** — 状态：blocked；下一步：抖店资质/店铺到位后新增 live `douyin` 适配器，完成 1 次真实 upsert+拉单。
+- [ ] **T-M6-05 现网冒烟** — 状态：blocked；下一步：含 D2/D3 真实审批一次，补 GATE-M6 证据后过门。
+- [ ] **push 与真实 PR** — 状态：待 owner 决定；GATE-M6 过门后进 M7（执行器接线）。
+
 > **2026-11-13 补登：CONTENT-BASE 链路已通过 loom + ark-code-latest 跑通 HTTP 端到端。**
 >
 > - **结论**：commerce-os 的内容生成链路（`CONTENT-BASE` 场景，经 loom `LLMContentProducer`）已在 HTTP 层真实验证闭环——Agent Key 认证 `POST /api/v1/content/requests` 返回 **201 + `evidence_refs=['llm:ark-code-latest']` + status=`pending_review`**，真实产出电商详情文案。
