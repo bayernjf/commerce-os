@@ -2,7 +2,7 @@
 // Runs in the browser (client:load). The cart token is an anonymous, stateless
 // session credential scoped to the cart — stored in localStorage; the API base
 // URL is injected from the Astro SSR layer (never read from client env).
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 export interface CartIslandProps {
   productId: string;
@@ -40,39 +40,36 @@ export default function CartIsland({ productId, skuId, priceLabel, apiBase }: Ca
   const [checkout, setCheckout] = useState<CheckoutState>({ kind: 'idle' });
   const inFlight = useRef(false);
 
-  const headers = (extra?: Record<string, string>): Record<string, string> => ({
+  const headers = (authToken: string | null, extra?: Record<string, string>): Record<string, string> => ({
     'content-type': 'application/json',
-    ...(token ? { authorization: `Cart ${token}` } : {}),
+    ...(authToken ? { authorization: `Cart ${authToken}` } : {}),
     ...extra,
   });
 
-  const ensureCart = useCallback(async (): Promise<string> => {
-    if (cartId) return cartId;
+  const ensureCart = useCallback(async (): Promise<{ id: string; token: string | null }> => {
+    if (cartId) return { id: cartId, token };
     const res = await fetch(`${apiBase}/api/v1/storefront/carts`, { method: 'POST' });
     if (!res.ok) throw new Error(`创建购物车失败 (${res.status})`);
     const body = (await res.json()) as { cart: { id: string }; cartToken?: string };
+    const nextToken = body.cartToken ?? token;
     if (body.cartToken) {
       localStorage.setItem(TOKEN_KEY, body.cartToken);
       setToken(body.cartToken);
     }
     setCartId(body.cart.id);
-    return body.cart.id;
-  }, [apiBase, cartId]);
+    return { id: body.cart.id, token: nextToken };
+  }, [apiBase, cartId, token]);
 
-  const loadCart = useCallback(async () => {
-    if (!token || !cartId) return;
-    const res = await fetch(`${apiBase}/api/v1/storefront/carts/${cartId}`, { headers: headers() });
-    if (!res.ok) return;
-    const body = (await res.json()) as { items: CartItem[] };
-    setItems(body.items);
-  }, [apiBase, token, cartId]);
-
-  useEffect(() => {
-    if (token && !cartId) {
-      // Token without a cart id cannot happen (token encodes the cart), so
-      // nothing to hydrate here; items load right after the first add.
-    }
-  }, [token, cartId]);
+  const loadCart = useCallback(
+    async (id: string, authToken: string | null) => {
+      if (!authToken) return;
+      const res = await fetch(`${apiBase}/api/v1/storefront/carts/${id}`, { headers: headers(authToken) });
+      if (!res.ok) return;
+      const body = (await res.json()) as { items: CartItem[] };
+      setItems(body.items);
+    },
+    [apiBase],
+  );
 
   const addToCart = async (): Promise<void> => {
     if (inFlight.current) return;
@@ -80,14 +77,14 @@ export default function CartIsland({ productId, skuId, priceLabel, apiBase }: Ca
     setBusy(true);
     setNotice(null);
     try {
-      const id = await ensureCart();
-      const res = await fetch(`${apiBase}/api/v1/storefront/carts/${id}/items`, {
+      const cart = await ensureCart();
+      const res = await fetch(`${apiBase}/api/v1/storefront/carts/${cart.id}/items`, {
         method: 'POST',
-        headers: headers(),
+        headers: headers(cart.token),
         body: JSON.stringify({ productId, skuId, qty: 1 }),
       });
       if (!res.ok) throw new Error(`加入购物车失败 (${res.status})`);
-      await loadCart();
+      await loadCart(cart.id, cart.token);
       setNotice('已加入购物车');
     } catch (err) {
       setNotice(err instanceof Error ? err.message : '操作失败');
@@ -106,7 +103,7 @@ export default function CartIsland({ productId, skuId, priceLabel, apiBase }: Ca
     try {
       const res = await fetch(`${apiBase}/api/v1/storefront/carts/${cartId}/checkout`, {
         method: 'POST',
-        headers: headers(),
+        headers: headers(token),
         body: JSON.stringify({}),
       });
       if (!res.ok) {
