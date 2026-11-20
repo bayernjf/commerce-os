@@ -179,4 +179,10 @@ HIT="$(printf '%s' "$LIST" | node -e "let d='';process.stdin.on('data',c=>d+=c).
 [ "$HIT" = "yes" ] || fail "refund list entry"
 ok "refund list settled"
 
+step "full refund closes the order"
+ORD2="$(curl -sf -H "$AUTH" "$API/storefront/carts/$CART/order")"
+OST2="$(printf '%s' "$ORD2" | json 'o.order.status')"
+[ "$OST2" = "refunded" ] || fail "order after full refund (got $OST2)"
+ok "order $OST2"
+
 step "GATE-S1 PASS (zeus $ZEUS_PORT + commerce $COMMERCE_PORT${WITH_CONSOLE:+ + console $CONSOLE_PORT})"

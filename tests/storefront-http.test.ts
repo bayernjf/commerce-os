@@ -194,4 +194,27 @@ describe('storefront HTTP layer (SF-08)', () => {
     });
     expect(allowed.headers.get('access-control-allow-origin')).toBe('https://shop.example.com');
   });
+
+  it('treats a lone * as the CORS wildcard', async () => {
+    const open = createApp({
+      services: h.services,
+      allowedOrigins: ['*'],
+      storefrontCartSecret: CART_SECRET,
+    });
+    const preflight = await open.request('/api/v1/storefront/carts', {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://localhost:4321',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe('*');
+
+    const simple = await open.request('/api/v1/storefront/catalog', {
+      headers: { origin: 'http://localhost:4321' },
+    });
+    expect(simple.headers.get('access-control-allow-origin')).toBe('*');
+  });
 });
