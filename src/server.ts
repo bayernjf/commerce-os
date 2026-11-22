@@ -4,6 +4,7 @@ import type { CommerceServices } from './services.js';
 import { registerHttpRoutes } from './api/routes.js';
 import type { AlertReporter } from './observability/alerts.js';
 import { checkReadiness } from './observability/readiness.js';
+import { PROMETHEUS_CONTENT_TYPE, renderPrometheusMetrics } from './observability/prometheus.js';
 
 export interface CommerceAppDeps {
   token?: string;
@@ -63,6 +64,14 @@ export function createApp(deps: CommerceAppDeps): Hono {
       return c.json({ ready: false, checks: result.checks }, 503);
     }
     return c.json({ ready: true, checks: result.checks });
+  });
+
+  // Prometheus text face for the Tier0 collector. It is registered outside
+  // /api/v1 so the ops bearer token does not apply: the collector runs on the
+  // local tier0-net and receives aggregate values only, never order rows.
+  app.get('/metrics', async (c) => {
+    const snapshot = await deps.services.dashboard.getMetrics();
+    return c.text(renderPrometheusMetrics(snapshot), 200, { 'Content-Type': PROMETHEUS_CONTENT_TYPE });
   });
 
   registerHttpRoutes(app, deps);
