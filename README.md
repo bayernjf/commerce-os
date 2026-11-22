@@ -53,6 +53,15 @@ npm run migrate:up         # 本地 sqlite 迁移（默认 ./data/commerce-os.db
 COMMERCE_API_TOKEN=dev-token npm start   # http://127.0.0.1:8787 （node --experimental-sqlite）
 ```
 
+审计证据用同级 `code-audit` 跑：
+
+```bash
+node ../code-audit/dist/cli.js --repo . --config audit.config.json --profile fast --out .code-audit/fast
+node ../code-audit/dist/cli.js --repo . --config audit.config.json --profile release --out .code-audit/release
+```
+
+`fast` 只跑 typecheck + lint；`release` 跑迁移配对、typecheck、lint、密钥扫描、测试和构建，并把日志与 SHA-256 写入 `.code-audit/release/`。
+
 `COMMERCE_API_TOKEN` 必须配置：授权为 fail-closed，未配置时服务拒绝启动
 （启动日志会打印一行当前授权姿态）。`/api/v1` 运营路由需要
 `Authorization: Bearer <token>`；前台公开路由（catalog/cart/webhook）由
