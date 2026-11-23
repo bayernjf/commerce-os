@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "profiles": {
+    "fast": ["typecheck", "lint"],
+    "release": ["migrations", "typecheck", "lint", "secrets", "test", "build"]
+  },
+  "checks": [
+    {
+      "id": "migrations",
+      "title": "Paired sqlite/postgres migrations",
+      "kind": "build",
+      "argv": ["npm", "run", "check:migrations"],
+      "required": true,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "typecheck",
+      "title": "TypeScript typecheck",
+      "kind": "build",
+      "argv": ["npm", "run", "typecheck"],
+      "required": true,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "lint",
+      "title": "ESLint",
+      "kind": "build",
+      "argv": ["npm", "run", "lint"],
+      "required": true,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "secrets",
+      "title": "Secret-boundary scan",
+      "kind": "security",
+      "argv": ["npm", "run", "lint:secrets"],
+      "required": true,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "test",
+      "title": "Unit and end-to-end tests",
+      "kind": "test",
+      "argv": ["npm", "test"],
+      "required": true,
+      "timeoutMs": 600000,
+      "acceptanceIds": ["GATE-M3"]
+    },
+    {
+      "id": "build",
+      "title": "Production build",
+      "kind": "build",
+      "argv": ["npm", "run", "build"],
+      "required": true,
+      "timeoutMs": 120000
+    }
+  ]
+}

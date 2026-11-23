@@ -3,7 +3,7 @@
 ## 待办登记（标准）
 
 > 本段是本产品唯一活跃待办入口；详细背景见下方原有章节。完成一项改 `[x]`，并在“最近变更 / Recently shipped”留证据。
-> 最近同步：2026-11-19
+> 最近同步：2026-11-22
 
 - [ ] **M6 现网（T-M6-03，外部）** — 状态：blocked；下一步：准备 Vercel/Cloudflare/云凭据 + 域名/TLS，跑 healthz/readyz。
 - [ ] **T-M9-01 VLM / 开放平台凭据** — 状态：blocked；下一步：owner 提供模型 ID/key 与 API 凭据，注册真实 `ListingIngestPort`，打通 `ingestFromImage` / `ingestFromUrl`。
@@ -23,6 +23,7 @@
 
 ## Current state（2026-10-28，storefront M1 SF-01~14 全部完成；GATE-M6 外部阻塞未过门）
 
+- **2026-11-22 审计门（CHG-2026-11-22-01，R2）**：新增 `audit.config.json`（fast = typecheck+lint；release = migrations+typecheck+lint+secrets+test+build），用同级 `code-audit` 实测 release **6/6 passed**，证据写入 `.code-audit/release/`；CI 接入待 `code-audit` 0.3.0 推送后补；变更合同见 `docs/delivery/2026-11-22-audit-gate.md`。
 - **基线**：33 个测试文件 / **170 用例全绿**；`typecheck` 0 错；`lint` 0 错；`lint:secrets` 零命中（2026-11-03 起入五门+CI，文档占位值走显式 allowlist）；迁移 sqlite + postgres 各 001/002/003/004/005/006/007（003 storefront 五表 + L0 owner 种子、004 webhook_deliveries、005 结算快照、006 退款行用量、007 结算完整性，见 Active work）。
 - **storefront SF-09 完成**：checkout 接 zeus D3 决策门——`checkout()` 先 decide 后碰钱（impact=external → D3 挂起 pending+decisionId，订单/支付不创建、cart 保持 open）；`approveCheckout/rejectCheckout(decisionId, approver, comment)` 恢复执行；直通（decided）立即 finalize；finalize 回填 order_id/payment_id；HTTP 审批端点 `POST /api/v1/storefront/checkouts/:decisionId/approve|reject`（ops Bearer，与公开/cart 端点分离）。三态测试 `tests/storefront-checkout-decision.test.ts` + HTTP 全链路（pending→approve→paid 199_800_000 微元）。
 - **storefront SF-10 完成**：前端子工程 `front/`（Astro SSR + @astrojs/node，output=server；独立 package.json，不污染 API 构建）——三页 SSR：`/`（首页 hero+精选 6）、`/catalog`（全部商品）、`/catalog/[id]`（详情+SKU 表+价格）+ 404 兜底；`src/lib/api.ts` 服务端只读 client（`COMMERCE_API_BASE_URL`，超时 3s、失败返回空，浏览器零 token 暴露）。运行时验证：API 8788 + front 4321，真实种子商品三页渲染命中（¥1,299 / SKU-SSR-1 / 404 兜底）。

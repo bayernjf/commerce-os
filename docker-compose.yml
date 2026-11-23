@@ -31,6 +31,7 @@ services:
     ports:
       # Loopback only; the reverse proxy exposes 80/443 publicly.
       - "127.0.0.1:8787:8787"
+    networks: [default, tier0-net]
     restart: unless-stopped
     healthcheck:
       # Liveness for the container runtime; readiness is /readyz.
@@ -81,3 +82,10 @@ services:
 
 volumes:
   commerce-data:
+
+networks:
+  # Shared Tier0 observability network. The observability stack owns the
+  # external network; keeping the default network preserves the backup sidecar.
+  tier0-net:
+    external: true
+    name: tier0-net
