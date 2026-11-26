@@ -5,11 +5,16 @@
 > 本段是本产品唯一活跃待办入口；详细背景见下方原有章节。完成一项改 `[x]`，并在“最近变更 / Recently shipped”留证据。
 > 最近同步：2026-11-22
 
-- [ ] **M6 现网（T-M6-03，外部）** — 状态：blocked；下一步：准备 Vercel/Cloudflare/云凭据 + 域名/TLS，跑 healthz/readyz。
-- [ ] **T-M9-01 VLM / 开放平台凭据** — 状态：blocked；下一步：owner 提供模型 ID/key 与 API 凭据，注册真实 `ListingIngestPort`，打通 `ingestFromImage` / `ingestFromUrl`。
-- [ ] **T-M6-04 抖店 live 适配器** — 状态：blocked；下一步：抖店资质/店铺到位后新增 live `douyin` 适配器，完成 1 次真实 upsert+拉单。
-- [ ] **T-M6-05 现网冒烟** — 状态：blocked；下一步：含 D2/D3 真实审批一次，补 GATE-M6 证据后过门。
-- [ ] **push 与真实 PR** — 状态：待 owner 决定；GATE-M6 过门后进 M7（执行器接线）。
+<!-- tier0:todos v1 -->
+| id | title | status | priority | owner | next | evidence | updated |
+|---|---|---|---|---|---|---|---|
+| CO-01 | M6 现网（T-M6-03，外部） | blocked | p1 | external | 准备 Vercel/Cloudflare/云凭据 + 域名/TLS，跑 healthz/readyz | - | 2026-11-22 |
+| CO-02 | T-M9-01 VLM / 开放平台凭据 | blocked | p1 | owner | owner 提供模型 ID/key 与 API 凭据，注册真实 `ListingIngestPort` | - | 2026-11-22 |
+| CO-03 | T-M6-04 抖店 live 适配器 | blocked | p1 | external | 抖店资质/店铺到位后新增 live `douyin` 适配器，完成 1 次真实 upsert+拉单 | - | 2026-11-22 |
+| CO-04 | T-M6-05 现网冒烟 | blocked | p2 | external | 含 D2/D3 真实审批一次，补 GATE-M6 证据后过门 | - | 2026-11-22 |
+| CO-05 | push 与真实 PR | planned | p2 | owner | GATE-M6 过门后进 M7（执行器接线） | - | 2026-11-22 |
+<!-- /tier0:todos -->
+
 
 > **2026-11-13 补登：CONTENT-BASE 链路已通过 loom + ark-code-latest 跑通 HTTP 端到端。**
 >
@@ -20,6 +25,7 @@
 > **2026-11-06 补登：dev → main 已于 2026-11-05 经 PR #7 合并（合并前 CI 全绿）；实测 origin/main 与 origin/dev 内容完全一致（git diff 为空）。**
 
 > 状态主入口。开工前先读；每完成一个工作单元立即更新（已完成划掉、待办保留）。
+
 
 ## Current state（2026-10-28，storefront M1 SF-01~14 全部完成；GATE-M6 外部阻塞未过门）
 
