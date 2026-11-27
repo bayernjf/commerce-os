@@ -13,8 +13,17 @@
 | CO-03 | T-M6-04 抖店 live 适配器 | blocked | p1 | external | 抖店资质/店铺到位后新增 live `douyin` 适配器，完成 1 次真实 upsert+拉单 | - | 2026-11-22 |
 | CO-04 | T-M6-05 现网冒烟 | blocked | p2 | external | 含 D2/D3 真实审批一次，补 GATE-M6 证据后过门 | - | 2026-11-22 |
 | CO-05 | push 与真实 PR | planned | p2 | owner | GATE-M6 过门后进 M7（执行器接线） | - | 2026-11-22 |
+| CO-06 | OpenAPI 3.1 合同层 + lint + breaking diff | done | p2 | self | `openapi.yaml` 覆盖全部 `/api/v1/*` 路由；`npm run openapi:lint` 走 redocly；`npm run openapi:breaking` 对比 HEAD 检出破坏性变更 | `openapi.yaml`；`redocly.yaml`；`scripts/check-openapi-breaking.mjs`；`.github/workflows/ci.yml` | 2026-11-27 |
 <!-- /tier0:todos -->
 
+
+> **2026-11-27 补登：OpenAPI 3.1 合同层落地（组合级 self 待办）。**
+>
+> - **交付**：`openapi.yaml`（OpenAPI 3.1.0）覆盖现有全部 `/api/v1/*` 路由（storefront 公开 + Cart token + ops Bearer 两套安全平面），schemas 对齐 `src/api/routes.ts` 与 `CommerceServices` 的主要实体。
+> - **lint**：`npm run openapi:lint` → `redocly lint openapi.yaml`，基于 `redocly.yaml`（recommended 延伸，关闭 `operation-4xx-response`/`operation-2xx-response`/`info-license` 因私有 API 与 501 placeholder），当前 **0 error 0 warning**。
+> - **breaking diff**：`npm run openapi:breaking` → `scripts/check-openapi-breaking.mjs`，bundle 当前 spec 与 `HEAD:openapi.yaml` 对比，检测删除 path/operation/2xx 响应、删除 required 请求/响应字段；HEAD 无 baseline 时跳过。
+> - **CI**：`.github/workflows/ci.yml` 已加 `OpenAPI contract lint` 步骤。
+> - **边界**：spec 为手写合同层（非 zod-openapi 生成器），复杂响应字段未 100% 逐字段对齐 service 类型；后续接入 Swagger UI 前如需生成器再评估 `@hono/zod-openapi`。未 commit / 未 push（本记录随本次改动一起提交）。
 
 > **2026-11-13 补登：CONTENT-BASE 链路已通过 loom + ark-code-latest 跑通 HTTP 端到端。**
 >
