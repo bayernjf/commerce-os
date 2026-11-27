@@ -1,0 +1,1262 @@
+openapi: 3.1.0
+info:
+  title: commerce-os
+  version: 0.1.0
+  description: |
+    Self-operated commerce minimal loop: products / orders / channel adapters /
+    aftersales. Business decisions are delegated to zeus via zeus-client.
+
+    Two auth planes share the `/api/v1` prefix:
+
+    - Storefront: public catalog reads and anonymous cart creation. Cart-scoped
+      mutations require a `Cart <token>` bearer-like header issued at cart creation.
+    - Ops: every other `/api/v1/*` route requires `Bearer <COMMERCE_API_TOKEN>`
+      when a token is configured; a missing/invalid token returns 401.
+
+    The spec is the source of truth for the HTTP contract and is validated by
+    `npm run openapi:lint`; breaking changes are guarded by
+    `npm run openapi:breaking`.
+  contact:
+    name: bayjf
+
+servers:
+  - url: http://localhost:8787
+    description: Local development
+
+tags:
+  - name: system
+    description: Health, readiness and metrics (outside the ops bearer).
+  - name: storefront
+    description: Public storefront catalog, cart, checkout and shopper order/refund.
+  - name: webhooks
+    description: Provider webhook delivery endpoints.
+  - name: checkout-decisions
+    description: Ops approval of storefront checkout decisions.
+  - name: channel-accounts
+    description: Channel account credentials and metadata.
+  - name: catalog
+    description: Product categories and products.
+  - name: orders
+    description: Order import and read models.
+  - name: inventory
+    description: Manual inventory levels (M3 placeholder).
+  - name: fulfillment
+    description: Fulfillment and payment placeholders.
+  - name: refunds
+    description: Refund request and approval.
+  - name: listings
+    description: Content submission and approval for channel publishing.
+  - name: content
+    description: Published content read model.
+  - name: events
+    description: Local audit event stream.
+  - name: dashboard
+    description: Aggregated dashboard metrics.
+
+security:
+  - opsBearer: []
+
+paths:
+  /healthz:
+    get:
+      tags: [system]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: Process is up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Healthz'
+  /readyz:
+    get:
+      tags: [system]
+      summary: Readiness probe with dependency round-trips
+      security: []
+      responses:
+        '200':
+          description: Dependencies ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readyz'
+        '503':
+          description: One or more dependency checks failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readyz'
+  /metrics:
+    get:
+      tags: [system]
+      summary: Prometheus text metrics
+      security: []
+      responses:
+        '200':
+          description: Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /api/v1/storefront/catalog:
+    get:
+      tags: [storefront]
+      summary: List the public catalog
+      security: []
+      responses:
+        '200':
+          description: Catalog items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [catalog]
+                properties:
+                  catalog:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CatalogItem'
+  /api/v1/storefront/catalog/{id}:
+    get:
+      tags: [storefront]
+      summary: Get one catalog item
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Catalog item
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [item]
+                properties:
+                  item:
+                    $ref: '#/components/schemas/CatalogItem'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/storefront/carts:
+    post:
+      tags: [storefront]
+      summary: Create an anonymous cart
+      security: []
+      responses:
+        '201':
+          description: Cart created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cart]
+                properties:
+                  cart:
+                    $ref: '#/components/schemas/Cart'
+                  cartToken:
+                    type: string
+                    description: Only present when a storefront cart secret is configured.
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/v1/storefront/carts/{id}:
+    get:
+      tags: [storefront]
+      summary: Get a cart with its items
+      security:
+        - storefrontCart: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Cart and items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cart, items]
+                properties:
+                  cart:
+                    $ref: '#/components/schemas/Cart'
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CartItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/storefront/carts/{id}/items:
+    post:
+      tags: [storefront]
+      summary: Add an item to a cart
+      security:
+        - storefrontCart: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId, skuId, qty]
+              properties:
+                productId: { type: string }
+                skuId: { type: string }
+                qty: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Updated items
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CartItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/storefront/carts/{id}/checkout:
+    post:
+      tags: [storefront]
+      summary: Check out a cart
+      security:
+        - storefrontCart: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                  description: Payment provider; defaults to `fake`.
+      responses:
+        '201':
+          description: Checkout created (may await approval)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkout]
+                properties:
+                  checkout:
+                    $ref: '#/components/schemas/Checkout'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/storefront/carts/{id}/order:
+    get:
+      tags: [storefront]
+      summary: Get the shopper order for a cart
+      security:
+        - storefrontCart: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Storefront order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order]
+                properties:
+                  order:
+                    $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/storefront/carts/{id}/refunds:
+    get:
+      tags: [storefront]
+      summary: List refunds for the shopper order
+      security:
+        - storefrontCart: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Refunds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refunds]
+                properties:
+                  refunds:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Refund'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [storefront]
+      summary: Request a refund for a shopper order line
+      security:
+        - storefrontCart: []
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, orderItemId]
+              properties:
+                reason: { type: string }
+                orderItemId: { type: string }
+                qty: { type: integer, minimum: 1 }
+      responses:
+        '201':
+          description: Refund created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refund]
+                properties:
+                  refund:
+                    $ref: '#/components/schemas/Refund'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '423':
+          description: Refund requires approval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refund]
+                properties:
+                  refund:
+                    $ref: '#/components/schemas/Refund'
+
+  /api/v1/storefront/webhooks/{provider}:
+    post:
+      tags: [webhooks]
+      summary: Receive a provider webhook delivery
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string }
+          description: Provider name; the HMAC secret must be configured server-side.
+        - name: x-signature
+          in: header
+          required: true
+          schema: { type: string }
+          description: HMAC over the raw request bytes.
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        '200':
+          description: Delivery handled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: {}
+        '501':
+          description: Secret not configured for this provider
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+
+  /api/v1/storefront/checkouts/{decisionId}/approve:
+    post:
+      tags: [checkout-decisions]
+      summary: Approve a checkout decision
+      parameters:
+        - $ref: '#/components/parameters/DecisionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver]
+              properties:
+                approver: { type: string }
+                comment: { type: string }
+      responses:
+        '200':
+          description: Checkout approved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [checkout]
+                properties:
+                  checkout:
+                    $ref: '#/components/schemas/Checkout'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/storefront/checkouts/{decisionId}/reject:
+    post:
+      tags: [checkout-decisions]
+      summary: Reject a checkout decision
+      parameters:
+        - $ref: '#/components/parameters/DecisionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver]
+              properties:
+                approver: { type: string }
+                comment: { type: string }
+      responses:
+        '200':
+          description: Checkout rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/channel-accounts:
+    post:
+      tags: [channel-accounts]
+      summary: Create a channel account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel, displayName]
+              properties:
+                channel: { type: string }
+                displayName: { type: string }
+                credentialRef: { type: string }
+                status: { type: string, enum: [active, disabled] }
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [account]
+                properties:
+                  account:
+                    $ref: '#/components/schemas/ChannelAccount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      tags: [channel-accounts]
+      summary: List channel accounts
+      responses:
+        '200':
+          description: Channel accounts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChannelAccount'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/categories:
+    post:
+      tags: [catalog]
+      summary: Create a product category
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                channel: { type: string }
+                parentId: { type: string }
+                attributes:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: Category created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [category]
+                properties:
+                  category:
+                    $ref: '#/components/schemas/Category'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      tags: [catalog]
+      summary: List categories
+      responses:
+        '200':
+          description: Categories
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [categories]
+                properties:
+                  categories:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/products:
+    post:
+      tags: [catalog]
+      summary: Create a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Product'
+      responses:
+        '201':
+          description: Product created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [product]
+                properties:
+                  product:
+                    $ref: '#/components/schemas/Product'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      tags: [catalog]
+      summary: List products
+      responses:
+        '200':
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [products]
+                properties:
+                  products:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Product'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/products/{id}:
+    get:
+      tags: [catalog]
+      summary: Get a product
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Product
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [product]
+                properties:
+                  product:
+                    $ref: '#/components/schemas/Product'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/orders/import:
+    post:
+      tags: [orders]
+      summary: Import orders from a channel account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channelAccountId]
+              properties:
+                channelAccountId: { type: string }
+                since: { type: string, format: date-time }
+      responses:
+        '201':
+          description: Import result
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/orders:
+    get:
+      tags: [orders]
+      summary: List orders
+      responses:
+        '200':
+          description: Orders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [orders]
+                properties:
+                  orders:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/orders/{id}:
+    get:
+      tags: [orders]
+      summary: Get an order
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order]
+                properties:
+                  order:
+                    $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/inventory:
+    post:
+      tags: [inventory]
+      summary: Set manual inventory for a SKU
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [skuId, qty]
+              properties:
+                skuId: { type: string }
+                qty: { type: integer }
+      responses:
+        '201':
+          description: Inventory row
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inventory]
+                properties:
+                  inventory:
+                    $ref: '#/components/schemas/Inventory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    get:
+      tags: [inventory]
+      summary: List inventory
+      responses:
+        '200':
+          description: Inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inventory]
+                properties:
+                  inventory:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Inventory'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/fulfillment/ship:
+    post:
+      tags: [fulfillment]
+      summary: Ship fulfillment (placeholder)
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/payments:
+    post:
+      tags: [fulfillment]
+      summary: Create payment (placeholder)
+      responses:
+        '501':
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/refunds:
+    post:
+      tags: [refunds]
+      summary: Request a refund
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderId, reason]
+              properties:
+                orderId: { type: string }
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      orderItemId: { type: string }
+                      qty: { type: integer, minimum: 1 }
+                      amount: { type: number }
+                reason: { type: string }
+                idempotencyKey: { type: string }
+      responses:
+        '201':
+          description: Refund created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refund]
+                properties:
+                  refund:
+                    $ref: '#/components/schemas/Refund'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '423':
+          description: Refund requires approval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refund]
+                properties:
+                  refund:
+                    $ref: '#/components/schemas/Refund'
+    get:
+      tags: [refunds]
+      summary: List refunds
+      responses:
+        '200':
+          description: Refunds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refunds]
+                properties:
+                  refunds:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Refund'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/refunds/{id}/decision:
+    post:
+      tags: [refunds]
+      summary: Approve or reject a refund
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict, approver]
+              properties:
+                verdict: { type: string, enum: [approve, reject] }
+                approver: { type: string }
+                comment: { type: string }
+      responses:
+        '200':
+          description: Refund decided
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refund]
+                properties:
+                  refund:
+                    $ref: '#/components/schemas/Refund'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/refunds/{id}:
+    get:
+      tags: [refunds]
+      summary: Get a refund
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Refund
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [refund]
+                properties:
+                  refund:
+                    $ref: '#/components/schemas/Refund'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/listings:
+    post:
+      tags: [listings]
+      summary: Submit listing content for channel publishing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId, channelAccountId, contentType]
+              properties:
+                productId: { type: string }
+                channelAccountId: { type: string }
+                contentType: { type: string }
+                sellingPoints:
+                  type: array
+                  items: { type: string }
+                constraints: { type: object }
+                imageUrls:
+                  type: array
+                  items: { type: string }
+                url: { type: string }
+      responses:
+        '201':
+          description: Listing submission created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [submission]
+                properties:
+                  submission:
+                    $ref: '#/components/schemas/ListingSubmission'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '423':
+          description: Submission requires approval
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [submission]
+                properties:
+                  submission:
+                    $ref: '#/components/schemas/ListingSubmission'
+  /api/v1/listings/{decisionId}/approve:
+    post:
+      tags: [listings]
+      summary: Approve a listing submission
+      parameters:
+        - $ref: '#/components/parameters/DecisionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver]
+              properties:
+                approver: { type: string }
+                comment: { type: string }
+      responses:
+        '200':
+          description: Listing approved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [submission]
+                properties:
+                  submission:
+                    $ref: '#/components/schemas/ListingSubmission'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/listings/{decisionId}/reject:
+    post:
+      tags: [listings]
+      summary: Reject a listing submission
+      parameters:
+        - $ref: '#/components/parameters/DecisionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver]
+              properties:
+                approver: { type: string }
+                comment: { type: string }
+      responses:
+        '200':
+          description: Listing rejected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/content:
+    get:
+      tags: [content]
+      summary: List published content
+      responses:
+        '200':
+          description: Published content
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content]
+                properties:
+                  content:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Content'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/content/{id}:
+    get:
+      tags: [content]
+      summary: Get published content
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+      responses:
+        '200':
+          description: Published content
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content]
+                properties:
+                  content:
+                    $ref: '#/components/schemas/Content'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/events:
+    get:
+      tags: [events]
+      summary: List audit events with optional filters
+      parameters:
+        - name: refType
+          in: query
+          schema: { type: string }
+        - name: refId
+          in: query
+          schema: { type: string }
+        - name: eventType
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [events]
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/dashboard:
+    get:
+      tags: [dashboard]
+      summary: Aggregated dashboard metrics
+      responses:
+        '200':
+          description: Metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [metrics]
+                properties:
+                  metrics: {}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    storefrontCart:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "Cart <hex-token> issued at cart creation."
+    opsBearer:
+      type: http
+      scheme: bearer
+      description: Ops token when `COMMERCE_API_TOKEN` is configured.
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    DecisionIdPath:
+      name: decisionId
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid auth
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema: { type: string }
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorBody'
+
+  schemas:
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            retryable: { type: boolean }
+
+    Healthz:
+      type: object
+      required: [ok, service, db, time]
+      properties:
+        ok: { type: boolean }
+        service: { type: string }
+        db: { type: string }
+        time: { type: string, format: date-time }
+
+    Readyz:
+      type: object
+      required: [ready, checks]
+      properties:
+        ready: { type: boolean }
+        checks: { type: object, additionalProperties: true }
+
+    CatalogItem:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        skus:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sku'
+
+    Sku:
+      type: object
+      required: [id, skuId]
+      properties:
+        id: { type: string }
+        skuId: { type: string }
+        price: { type: number }
+        stock: { type: integer }
+
+    Cart:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        merchantId: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    CartItem:
+      type: object
+      required: [id, cartId, productId, skuId, qty]
+      properties:
+        id: { type: string }
+        cartId: { type: string }
+        productId: { type: string }
+        skuId: { type: string }
+        qty: { type: integer }
+
+    Checkout:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status: { type: string }
+        decisionId: { type: string }
+        provider: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Order:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string }
+        externalId: { type: string }
+        externalType: { type: string }
+        status: { type: string }
+        channelAccountId: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Refund:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string }
+        orderId: { type: string }
+        status: { type: string }
+        reason: { type: string }
+        amount: { type: number }
+        createdAt: { type: string, format: date-time }
+
+    ChannelAccount:
+      type: object
+      required: [id, channel, displayName]
+      properties:
+        id: { type: string }
+        channel: { type: string }
+        displayName: { type: string }
+        credentialRef: { type: string }
+        status: { type: string, enum: [active, disabled] }
+
+    Category:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        channel: { type: string }
+        parentId: { type: string }
+        attributes:
+          type: array
+          items: { type: string }
+
+    Product:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        categoryId: { type: string }
+        skus:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sku'
+
+    Inventory:
+      type: object
+      required: [skuId, qty]
+      properties:
+        skuId: { type: string }
+        qty: { type: integer }
+
+    ListingSubmission:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status: { type: string }
+        decisionId: { type: string }
+        productId: { type: string }
+        channelAccountId: { type: string }
+        contentType: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    Content:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        productId: { type: string }
+        channelAccountId: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    AuditEvent:
+      type: object
+      required: [id, eventType]
+      properties:
+        id: { type: string }
+        eventType: { type: string }
+        refType: { type: string }
+        refId: { type: string }
+        payload: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }

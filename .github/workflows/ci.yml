@@ -43,6 +43,8 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      - name: OpenAPI contract lint
+        run: npm run openapi:lint
       - name: Secret-boundary scan
         run: npm run lint:secrets
       - name: Unit + e2e tests
