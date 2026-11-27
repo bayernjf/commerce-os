@@ -22,15 +22,18 @@
     "restore:state": "node --experimental-sqlite scripts/restore-commerce.mjs",
     "e2e:storefront": "bash scripts/e2e-storefront.sh",
     "e2e:storefront:console": "bash scripts/e2e-storefront.sh --with-console",
-    "lint:secrets": "bash scripts/scan-secrets.sh"
+    "lint:secrets": "bash scripts/scan-secrets.sh",
+    "openapi:lint": "redocly lint openapi.yaml",
+    "openapi:breaking": "node scripts/check-openapi-breaking.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
+    "@model-hub/model-kit": "file:../model-hub/packages/model-kit",
     "hono": "^4.13.13",
-    "zeus-client": "file:../zeus/packages/zeus-client",
-    "@model-hub/model-kit": "file:../model-hub/packages/model-kit"
+    "zeus-client": "file:../zeus/packages/zeus-client"
   },
   "devDependencies": {
+    "@redocly/cli": "^2.84.0",
     "@types/node": "^22.10.5",
     "eslint": "^9.0.0",
     "typescript": "^5.7.2",
